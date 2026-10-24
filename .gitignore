@@ -17,3 +17,6 @@ private/
 dist/
 build/
 *.egg-info/
+
+# Local dependency folders used in offline QA
+.deps/
