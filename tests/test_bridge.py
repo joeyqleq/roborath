@@ -2,7 +2,13 @@ import asyncio, os, tempfile
 from pathlib import Path
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GT_TWITCH_DB"] = str(Path(tmp)/"chat.sqlite3")
+    os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="12345"
+    os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="99999"
+    import bridge
     from bridge import Bridge
+    async def mock_shortlinks(text, client):
+        return text.replace("https://example.org", "https://is.gd/mock")
+    bridge.shorten_sources = mock_shortlinks
     async def test():
         bot=Bridge()
         outgoing=[]
