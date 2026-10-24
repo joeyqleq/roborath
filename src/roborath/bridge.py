@@ -9,6 +9,7 @@ from policy import PolicyStore, parse_public
 from formatting import messages
 from shortlinks import shorten_sources
 from mario import Mario
+from notifications import Notifications
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
@@ -63,6 +64,7 @@ class Bridge:
         streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
         self.mario = Mario(self.db)
+        self.notifications = Notifications(self.db)
 
     async def twitch_api(self, method, path, data=None):
         r = await self.http.request(method, "https://api.twitch.tv/helix"+path,
@@ -201,6 +203,7 @@ class Bridge:
             self.db.execute("DELETE FROM chat_events WHERE twitch_user_id=?",(user,))
             analytics_remove_user(self.db,user)
             if self.policy: self.policy.forget(user)
+            self.notifications.forget(user)
             self.db.commit()
             await self.twitch_reply("Saved history deleted; future chat logging is off for you. Type !optin to reenable.",mid)
             return
@@ -223,6 +226,13 @@ class Bridge:
             self.db.commit()
             if inserted.rowcount == 0:
                 return  # never answer duplicate message IDs on reconnect
+            alerts = self.notifications.scan(stream,raw)
+            for _,recipient,notice in alerts:
+                row=self.db.execute("""SELECT twitch_login FROM chat_events
+                    WHERE twitch_user_id=? ORDER BY created_utc DESC LIMIT 1""",
+                    (recipient,)).fetchone()
+                name=row[0] if row else recipient
+                await self.twitch_reply("@"+name+" reminder: "+notice,mid)
         except sqlite3.Error as err:
             LOG.warning("chat log write failed %s",type(err).__name__)
         now=time.monotonic()
@@ -235,6 +245,24 @@ class Bridge:
             else:
                 text="roborath: !fact <claim> (2/stream), !research <topic> (1/day). or 'hey roborath, fact ...'. try !rr help 2."
             await self.twitch_reply(text,mid)
+            return
+        remind_match = re.fullmatch(r"!rr\s+remind\s+(\d{1,4}[mhd])\s+(.+)",cmd,re.I)
+        if remind_match:
+            try:
+                self.notifications.add_reminder(user,stream,remind_match[1],remind_match[2])
+                reply="ok, reminder queued for "+remind_match[1]+" from now (text chat only)"
+            except ValueError as err:reply=str(err)
+            last_user_call[user]=now
+            await self.twitch_reply(reply,mid)
+            return
+        watch_match = re.fullmatch(r"!rr\s+watch\s+(.{3,80}?)\s*=>\s*(.{1,180})",cmd,re.I)
+        if watch_match:
+            try:
+                self.notifications.watch(user,stream,watch_match[1],watch_match[2])
+                reply="watch set for 12h in this chat. up to 3 watches/user."
+            except ValueError as err:reply=str(err)
+            last_user_call[user]=now
+            await self.twitch_reply(reply,mid)
             return
         if cmd.lower().startswith("?! "):
             outcome=self.mario.vote(stream,user,cmd[3:])
