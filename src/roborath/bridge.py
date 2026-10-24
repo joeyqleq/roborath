@@ -215,7 +215,7 @@ class Bridge:
         if self.db.execute("SELECT 1 FROM opt_outs WHERE twitch_user_id=?",(user,)).fetchone():
             return
         if raw.strip().lower()=="!privacy":
-            await self.twitch_reply("Chat logs are kept by user and stream for up to "+str(RETENTION_DAYS)+" days. Use !forgetme to delete and opt out. Policy: https://matter.greenthumb.lol/static/gt-twitch-privacy.html",mid)
+            await self.twitch_reply("public chat logs: up to "+str(RETENTION_DAYS)+" days; activity counts: up to 180 days. use !forgetme to delete ur stored info and opt out.",mid)
             return
         stream=await self.stream_id()
         try:
