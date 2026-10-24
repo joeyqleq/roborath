@@ -7,6 +7,7 @@ is needed. The IRC adapter reuses Bridge's routing, per-viewer memory, consent,
 cooldowns, and Mattermost integration.
 """
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -146,6 +147,24 @@ class IRCAdapter:
             await self.ws.send(tag + "PRIVMSG #" + CHANNEL + " :" + answer + "\r\n")
             self.last_send = time.monotonic()
 
+    async def reminder_loop(self):
+        """Post due reminders while connected, with the same paced IRC queue."""
+        while self.ws:
+            try:
+                due = self.bridge.notifications.due(limit=4)
+                for reminder_id, user_id, note in due:
+                    row=self.bridge.db.execute("""SELECT twitch_login FROM chat_events
+                        WHERE twitch_user_id=? ORDER BY created_utc DESC LIMIT 1""",
+                        (user_id,)).fetchone()
+                    if not row:
+                        # Retain the reminder; user identity can be resolved later.
+                        continue
+                    await self.reply("@"+row[0]+" reminder: "+note,"")
+                    self.bridge.notifications.delivered(reminder_id)
+            except Exception as err:
+                LOG.warning("reminder delivery deferred (%s)",type(err).__name__)
+            await asyncio.sleep(10)
+
     async def run(self):
         while True:
             try:
@@ -158,28 +177,13 @@ class IRCAdapter:
                     await ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
                     await ws.send("JOIN #" + CHANNEL + "\r\n")
                     LOG.info("Connecting to Twitch channel %s as normal viewer", CHANNEL)
-                    async for chunk in ws:
-                        for line in chunk.split("\r\n"):
-                            if not line:
-                                continue
-                            if line.startswith("PING "):
-                                await ws.send("PONG " + line[5:] + "\r\n")
-                                continue
-                            if "Login authentication failed" in line:
-                                raise PermissionError("Twitch rejected IRC login")
-                            if "You are permanently banned" in line:
-                                raise PermissionError("Account banned from channel")
-                            if " PRIVMSG #" not in line:
-                                continue
-                            event = parse_privmsg(line)
-                            if not event:
-                                continue
-                            incoming_channel, payload = event
-                            if incoming_channel != CHANNEL or payload["chatter_user_login"] == NICK:
-                                continue
-                            if payload["room_id"]:
-                                self.room_id = payload["room_id"]
-                            asyncio.create_task(self.bridge.on_chat(payload))
+                    reminder_task=asyncio.create_task(self.reminder_loop())
+                    try:
+                        await self.read_irc(ws)
+                    finally:
+                        reminder_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await reminder_task
             except PermissionError as exc:
                 LOG.error("IRC permissions failure: %s", exc)
                 return
@@ -189,6 +193,29 @@ class IRCAdapter:
                 self.ws = None
             await asyncio.sleep(12)
 
+    async def read_irc(self,ws):
+        async for chunk in ws:
+            for line in chunk.split("\r\n"):
+                if not line:
+                    continue
+                if line.startswith("PING "):
+                    await ws.send("PONG " + line[5:] + "\r\n")
+                    continue
+                if "Login authentication failed" in line:
+                                raise PermissionError("Twitch rejected IRC login")
+                if "You are permanently banned" in line:
+                                raise PermissionError("Account banned from channel")
+                if " PRIVMSG #" not in line:
+                    continue
+                event = parse_privmsg(line)
+                if not event:
+                    continue
+                incoming_channel, payload = event
+                if incoming_channel != CHANNEL or payload["chatter_user_login"] == NICK:
+                    continue
+                if payload["room_id"]:
+                    self.room_id = payload["room_id"]
+                asyncio.create_task(self.bridge.on_chat(payload))
 
 async def main():
     required = ["TWITCH_IRC_NICK", "TWITCH_CHANNEL_LOGIN",
