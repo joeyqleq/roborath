@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
+from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
 LOG = logging.getLogger("gt-twitch")
@@ -35,6 +36,7 @@ def init_db():
        status TEXT NOT NULL DEFAULT 'received')""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_user_stream ON chat_events(twitch_user_id,stream_id)")
     db.execute("CREATE TABLE IF NOT EXISTS opt_outs (twitch_user_id TEXT PRIMARY KEY, opted_out_utc TEXT NOT NULL)")
+    analytics_initialize(db)
     db.execute("DELETE FROM chat_events WHERE created_utc < ?", ((datetime.now(timezone.utc)-timedelta(days=RETENTION_DAYS)).isoformat(),))
     db.commit()
     return db
@@ -135,11 +137,13 @@ class Bridge:
         if not (user and mid):return
         if time.monotonic() >= self.prune_after:
             self.db.execute("DELETE FROM chat_events WHERE created_utc < ?",((datetime.now(timezone.utc)-timedelta(days=RETENTION_DAYS)).isoformat(),))
+            analytics_prune(self.db)
             self.db.commit()
             self.prune_after = time.monotonic()+86400
         if raw.strip().lower() in ("!forgetme","!optout","!stop"):
             self.db.execute("INSERT OR REPLACE INTO opt_outs (twitch_user_id,opted_out_utc) VALUES (?,?)",(user,datetime.now(timezone.utc).isoformat()))
             self.db.execute("DELETE FROM chat_events WHERE twitch_user_id=?",(user,))
+            analytics_remove_user(self.db,user)
             self.db.commit()
             await self.twitch_reply("Saved history deleted; future chat logging is off for you. Type !optin to reenable.",mid)
             return
@@ -155,8 +159,10 @@ class Bridge:
             return
         stream=await self.stream_id()
         try:
-            self.db.execute("INSERT OR IGNORE INTO chat_events (message_id,stream_id,twitch_user_id,twitch_login,created_utc,request_text,status) VALUES (?,?,?,?,?,?,?)",
+            inserted = self.db.execute("INSERT OR IGNORE INTO chat_events (message_id,stream_id,twitch_user_id,twitch_login,created_utc,request_text,status) VALUES (?,?,?,?,?,?,?)",
                 (mid,stream,user,login,datetime.now(timezone.utc).isoformat(),clean_request(raw),"observed"))
+            if inserted.rowcount == 1:
+                analytics_record(self.db, user, login, stream)
             self.db.commit()
         except sqlite3.Error as err:
             LOG.warning("chat log write failed %s",type(err).__name__)

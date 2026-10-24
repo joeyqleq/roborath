@@ -8,6 +8,7 @@ AI-assisted Twitch chat companion for **rath_bone**, using the **roborath** Twit
 
 - `src/roborath/irc_adapter.py` — Twitch IRC WebSocket client, explicit normal-account OAuth validation, per-message parsing, paced concise replies.
 - `src/roborath/bridge.py` — Mattermost AI relay, SQLite stream/user continuity memory, chat-command routing, viewer opt-out and 30-day pruning.
+- `src/roborath/analytics.py` — private aggregate participation statistics using five-minute activity buckets, 180-day summary pruning, and viewer deletion; **not** covert psychological profiling.
 - `tests/` — offline tests for IRC parsing, reply formatting, command flow, memory isolation and deletion.
 - `deploy/` — a disabled-by-default systemd unit template.
 - `docs/architecture.md` — authorization and operational boundaries.
@@ -31,6 +32,7 @@ On ORA3, with the pre-installed Python virtual environment:
 cd /home/jq/projects/roborath
 PYTHONPATH=src/roborath /opt/gt-twitch-bridge/.venv/bin/python tests/test_bridge.py
 PYTHONPATH=src/roborath /opt/gt-twitch-bridge/.venv/bin/python tests/test_irc_adapter.py
+PYTHONPATH=src/roborath /opt/gt-twitch-bridge/.venv/bin/python -m unittest discover -s tests -p test_analytics.py -v
 ```
 
 The service is **not** started by checking out the repo. Never place real credentials in Git.
