@@ -221,6 +221,8 @@ class Bridge:
             if inserted.rowcount == 1:
                 analytics_record(self.db, user, login, stream)
             self.db.commit()
+            if inserted.rowcount == 0:
+                return  # never answer duplicate message IDs on reconnect
         except sqlite3.Error as err:
             LOG.warning("chat log write failed %s",type(err).__name__)
         now=time.monotonic()
