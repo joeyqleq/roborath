@@ -1,0 +1,22 @@
+[Unit]
+Description=RoboRath Twitch IRC / Mattermost AI relay (unprivileged)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=roborath
+Group=roborath
+WorkingDirectory=/opt/roborath
+EnvironmentFile=/etc/roborath.env
+ExecStart=/opt/roborath/.venv/bin/python /opt/roborath/src/roborath/irc_adapter.py
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/roborath
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+[Install]
+WantedBy=multi-user.target
