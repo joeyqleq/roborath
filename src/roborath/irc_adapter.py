@@ -191,10 +191,13 @@ class IRCAdapter:
 
 
 async def main():
-    missing = [k for k in (
-        "TWITCH_IRC_NICK", "TWITCH_IRC_TOKEN", "TWITCH_CHANNEL_LOGIN",
-        "MATTERMOST_BOT_TOKEN", "MATTERMOST_CHANNEL_ID"
-    ) if not os.getenv(k)]
+    required = ["TWITCH_IRC_NICK", "TWITCH_CHANNEL_LOGIN",
+                "MATTERMOST_BOT_TOKEN", "MATTERMOST_CHANNEL_ID",
+                "ROBORATH_OWNER_TWITCH_USER_ID",
+                "ROBORATH_STREAMER_TWITCH_USER_ID"]
+    required += (["TWITCH_CLIENT_ID","TWITCH_CLIENT_SECRET"] if TOKEN_FILE
+                 else ["TWITCH_IRC_TOKEN"])
+    missing = [k for k in required if not os.getenv(k)]
     if missing:
         raise SystemExit("Not activated; missing required configuration: " + ", ".join(missing))
     if not re.fullmatch(r"[a-z0-9_]{3,25}", NICK):
