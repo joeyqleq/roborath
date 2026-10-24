@@ -8,6 +8,7 @@ import httpx
 from policy import PolicyStore, parse_public
 from formatting import messages
 from shortlinks import shorten_sources
+from mario import Mario
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
@@ -61,6 +62,7 @@ class Bridge:
         owner_id = os.getenv("ROBORATH_OWNER_TWITCH_USER_ID", "")
         streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
+        self.mario = Mario(self.db)
 
     async def twitch_api(self, method, path, data=None):
         r = await self.http.request(method, "https://api.twitch.tv/helix"+path,
@@ -157,6 +159,32 @@ class Bridge:
                 return None
         return None
 
+    def handle_mario(self, text, actor_id, stream):
+        parts=text.lower().strip().split()
+        if len(parts)>=3 and parts[:2]==["!rr","win"]:
+            return self.mario.vote(stream,actor_id," ".join(parts[2:]))
+        if len(parts)>=2 and parts[:2]==["?!"]:
+            return self.mario.vote(stream,actor_id," ".join(parts[1:]))
+        if len(parts)>=3 and parts[:2]==["!rr","mario"]:
+            action=parts[2]
+            if action in ("scores","leaderboard"):
+                scores=self.mario.scores(stream if action=="scores" else None)
+                return "mario wins: "+(", ".join(name+" "+str(points) for name,points in scores[:10]) if scores else "no confirmed wins yet")
+            if not self.policy or not self.policy.can_manage(actor_id,"mario_manage"):
+                return None
+            if action in ("on","off") and len(parts)==3:
+                self.mario.enable(stream,action=="on")
+                return "mario kart mode "+("on! who's playing? operator: !rr mario roster <players>" if action=="on" else "off")
+            if action=="roster" and len(parts)>=5:
+                try:
+                    self.mario.roster(stream,parts[3:])
+                    return "players tonight: "+", ".join(self.mario.players(stream))
+                except ValueError:
+                    return "add 2-12 distinct player names"
+            if action=="next" and len(parts)==3:
+                return self.mario.next_round(stream)
+        return None
+
     async def on_chat(self, event):
         raw=event.get("message",{}).get("text","")
         user=event.get("chatter_user_id","")
@@ -205,6 +233,18 @@ class Bridge:
             else:
                 text="roborath: !fact <claim> (2/stream), !research <topic> (1/day). or 'hey roborath, fact ...'. try !rr help 2."
             await self.twitch_reply(text,mid)
+            return
+        if cmd.lower().startswith("?! "):
+            outcome=self.mario.vote(stream,user,cmd[3:])
+            if self.mario.active(stream):
+                last_user_call[user]=now
+                await self.twitch_reply(outcome,mid)
+            return
+        if cmd.lower().startswith("!rr win ") or cmd.lower().startswith("!rr mario "):
+            outcome=self.handle_mario(cmd,user,stream)
+            if outcome is not None:
+                last_user_call[user]=now
+                await self.twitch_reply(outcome,mid)
             return
         if cmd.lower()=="!rr id":
             last_user_call[user]=now
