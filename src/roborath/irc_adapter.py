@@ -16,6 +16,7 @@ import time
 import httpx
 from websockets.asyncio.client import connect
 from bridge import Bridge, clean_request
+from twitch_auth import access_token
 
 LOG = logging.getLogger("gt-twitch-irc")
 IRC_WS = "wss://irc-ws.chat.twitch.tv:443"
@@ -23,6 +24,8 @@ NICK = os.getenv("TWITCH_IRC_NICK", "").strip().lower()
 CHANNEL = os.getenv("TWITCH_CHANNEL_LOGIN", "").strip().lower().lstrip("#")
 TOKEN = os.getenv("TWITCH_IRC_TOKEN", "").strip().removeprefix("oauth:")
 CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "").strip()
+CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "").strip()
+TOKEN_FILE = os.getenv("TWITCH_TOKEN_FILE", "").strip()
 MIN_REPLY_INTERVAL = max(2, int(os.getenv("GT_GLOBAL_REPLY_COOLDOWN_SECONDS", "12")))
 
 
@@ -68,6 +71,7 @@ class IRCAdapter:
     def __init__(self):
         self.bridge = Bridge()
         self.ws = None
+        self.token = TOKEN
         self.send_lock = asyncio.Lock()
         self.last_send = 0.0
         self.room_id = ""
@@ -76,9 +80,17 @@ class IRCAdapter:
         self.bridge.stream_id = self.stream_id
 
     async def validate_token(self):
+        if TOKEN_FILE:
+            if not CLIENT_ID or not CLIENT_SECRET:
+                raise PermissionError("missing confidential Twitch OAuth app config")
+            self.token, bot_id = await access_token(CLIENT_ID, CLIENT_SECRET,
+                                                     TOKEN_FILE, required_login=NICK)
+            LOG.info("OAuth valid for RoboRath user ID %s", bot_id)
+        if not self.token:
+            raise PermissionError("RoboRath has no authorized OAuth token")
         async with httpx.AsyncClient(timeout=12) as http:
             response = await http.get("https://id.twitch.tv/oauth2/validate",
-                                      headers={"Authorization": "OAuth " + TOKEN})
+                                      headers={"Authorization": "OAuth " + self.token})
             response.raise_for_status()
             record = response.json()
             scopes = set(record.get("scopes", []))
@@ -100,7 +112,7 @@ class IRCAdapter:
                     r = await http.get("https://api.twitch.tv/helix/streams",
                         params={"user_id": self.room_id},
                         headers={"Client-ID": CLIENT_ID,
-                                 "Authorization": "Bearer " + TOKEN})
+                                 "Authorization": "Bearer " + self.token})
                     r.raise_for_status()
                     streams = r.json().get("data", [])
                     if streams:
@@ -141,7 +153,7 @@ class IRCAdapter:
                 async with connect(IRC_WS, ping_interval=40, ping_timeout=30,
                                    max_size=1_000_000) as ws:
                     self.ws = ws
-                    await ws.send("PASS oauth:" + TOKEN + "\r\n")
+                    await ws.send("PASS oauth:" + self.token + "\r\n")
                     await ws.send("NICK " + NICK + "\r\n")
                     await ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
                     await ws.send("JOIN #" + CHANNEL + "\r\n")
