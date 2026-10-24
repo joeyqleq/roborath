@@ -5,6 +5,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
+from policy import PolicyStore, parse_public
+from formatting import messages
+from shortlinks import shorten_sources
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
@@ -55,6 +58,9 @@ class Bridge:
         self.session_id = None
         self.stream_cache = ("", 0.0)
         self.prune_after = time.monotonic()+86400
+        owner_id = os.getenv("ROBORATH_OWNER_TWITCH_USER_ID", "")
+        streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
+        self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
 
     async def twitch_api(self, method, path, data=None):
         r = await self.http.request(method, "https://api.twitch.tv/helix"+path,
@@ -129,6 +135,28 @@ class Bridge:
                  "message":text[:450],"reply_parent_message_id":message_id}
         return await self.twitch_api("POST","/chat/messages",payload)
 
+    def handle_operator(self, raw, actor_id, stream):
+        """Strict, bounded owner/supervisor commands using immutable user IDs."""
+        if self.policy is None:return None
+        parts=raw.lower().split()
+        if len(parts)==5 and parts[:2]==["!rr","grant"]:
+            _,_,target,capability,amount=parts
+            try:
+                self.policy.grant_extra(actor_id,target,capability,
+                    self.policy.scope(capability,stream),int(amount))
+                return "granted "+amount+" extra "+capability+" uses to twitch user "+target
+            except (ValueError,PermissionError):
+                return None
+        if len(parts)==5 and parts[:2]==["!rr","supervisor"]:
+            _,_,action,target,capability=parts
+            if action not in ("add","remove"):return None
+            try:
+                self.policy.delegate(actor_id,target,capability,action=="add")
+                return "supervisor "+capability+" "+("enabled" if action=="add" else "revoked")+" for "+target
+            except (ValueError,PermissionError):
+                return None
+        return None
+
     async def on_chat(self, event):
         raw=event.get("message",{}).get("text","")
         user=event.get("chatter_user_id","")
@@ -144,6 +172,7 @@ class Bridge:
             self.db.execute("INSERT OR REPLACE INTO opt_outs (twitch_user_id,opted_out_utc) VALUES (?,?)",(user,datetime.now(timezone.utc).isoformat()))
             self.db.execute("DELETE FROM chat_events WHERE twitch_user_id=?",(user,))
             analytics_remove_user(self.db,user)
+            if self.policy: self.policy.forget(user)
             self.db.commit()
             await self.twitch_reply("Saved history deleted; future chat logging is off for you. Type !optin to reenable.",mid)
             return
@@ -233,7 +262,8 @@ class Bridge:
 
 async def main():
     required=["TWITCH_CLIENT_ID","TWITCH_BOT_ACCESS_TOKEN","TWITCH_BOT_USER_ID",
-              "TWITCH_BROADCASTER_USER_ID","MATTERMOST_BOT_TOKEN","MATTERMOST_CHANNEL_ID"]
+              "TWITCH_BROADCASTER_USER_ID","MATTERMOST_BOT_TOKEN","MATTERMOST_CHANNEL_ID",
+              "ROBORATH_OWNER_TWITCH_USER_ID","ROBORATH_STREAMER_TWITCH_USER_ID"]
     missing=[x for x in required if not os.getenv(x)]
     if missing:raise SystemExit("Not activated; missing configuration: "+", ".join(missing))
     if not MM_URL.startswith("https://"):raise SystemExit("Mattermost must use HTTPS")
