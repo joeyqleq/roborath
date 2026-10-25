@@ -28,9 +28,21 @@ with tempfile.TemporaryDirectory() as tmp:
             await bot.on_chat(event("m2","!fact Test claim?"))
         row=bot.db.execute("SELECT stream_id,status FROM chat_events WHERE message_id='m2'").fetchone()
         assert row==("stream-test-123","answered"),row
+        # Untrusted viewer can't create a persistent keyword watch.
+        unauthorized={"message_id":"watch1","chatter_user_id":"556",
+                      "chatter_user_login":"visitor",
+                      "message":{"text":"!rr watch sensitive => alert me"}}
+        await bot.on_chat(unauthorized)
+        assert bot.db.execute("SELECT count(*) FROM rr_text_watches").fetchone()[0]==0
+        # Only the verified owner may create watches or delegate trigger_manage.
+        authorized={"message_id":"watch2","chatter_user_id":"12345",
+                    "chatter_user_login":"owner",
+                    "message":{"text":"!rr watch sensitive => alert me"}}
+        await bot.on_chat(authorized)
+        assert bot.db.execute("SELECT count(*) FROM rr_text_watches").fetchone()[0]==1
         await bot.on_chat(event("m3","!forgetme"))
         assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==0
-        assert len(outgoing)==2
+        assert len(outgoing)==3
         await bot.http.aclose();bot.db.close()
     asyncio.run(test())
 print("PASS: stream logging, agent routing, status and privacy deletion")
