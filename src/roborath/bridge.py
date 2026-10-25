@@ -257,6 +257,8 @@ class Bridge:
             return
         watch_match = re.fullmatch(r"!rr\s+watch\s+(.{3,80}?)\s*=>\s*(.{1,180})",cmd,re.I)
         if watch_match:
+            if not self.policy or not self.policy.can_manage(user,"trigger_manage"):
+                return  # Only verified owner or explicitly delegated trigger supervisors.
             try:
                 self.notifications.watch(user,stream,watch_match[1],watch_match[2])
                 reply="watch set for 12h in this chat. up to 3 watches/user."
