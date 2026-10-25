@@ -41,7 +41,11 @@ with tempfile.TemporaryDirectory() as tmp:
         await bot.on_chat(authorized)
         assert bot.db.execute("SELECT count(*) FROM rr_text_watches").fetchone()[0]==1
         await bot.on_chat(event("m3","!forgetme"))
-        assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==0
+        assert bot.db.execute(
+            "SELECT count(*) FROM chat_events WHERE twitch_user_id='u123'"
+        ).fetchone()[0]==0
+        # Other viewers' logs aren't deleted by a single-user opt-out.
+        assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==2
         assert len(outgoing)==3
         await bot.http.aclose();bot.db.close()
     asyncio.run(test())
