@@ -236,7 +236,7 @@ class Bridge:
         except sqlite3.Error as err:
             LOG.warning("chat log write failed %s",type(err).__name__)
         now=time.monotonic()
-        if now-last_user_call.get(user,0)<USER_WAIT:return
+        if user in last_user_call and now-last_user_call[user]<USER_WAIT:return
         cmd=raw.strip()
         if re.fullmatch(r"!rr\s+help(?:\s+[12])?",cmd,re.I):
             last_user_call[user]=now
