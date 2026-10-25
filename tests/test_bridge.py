@@ -1,4 +1,6 @@
 import asyncio, os, tempfile
+from unittest.mock import patch
+from types import SimpleNamespace
 from pathlib import Path
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GT_TWITCH_DB"] = str(Path(tmp)/"chat.sqlite3")
@@ -20,7 +22,10 @@ with tempfile.TemporaryDirectory() as tmp:
         event=lambda mid,txt:{"message_id":mid,"chatter_user_id":"u123","chatter_user_login":"viewer","message":{"text":txt}}
         await bot.on_chat(event("m1","Hello world"))
         assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==1
-        await bot.on_chat(event("m2","!fact Test claim?"))
+        bridge.last_user_call.clear()
+        # A fresh host may have monotonic uptime below the cooldown.
+        with patch.object(bridge, "time", SimpleNamespace(monotonic=lambda: 1.0)):
+            await bot.on_chat(event("m2","!fact Test claim?"))
         row=bot.db.execute("SELECT stream_id,status FROM chat_events WHERE message_id='m2'").fetchone()
         assert row==("stream-test-123","answered"),row
         await bot.on_chat(event("m3","!forgetme"))
