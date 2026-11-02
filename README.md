@@ -8,7 +8,7 @@
 
 - Twitch IRC WebSocket adapter with verified user-token identity, confidential OAuth localhost authorization and refreshable private token storage.
 - Short, informal responses with conservative UTF-8 byte limits, a one-message quick fact-check limit and up to two research messages.
-- Two fact checks per user per broadcast, one research request per user per UTC day. Verified owner/streamer exemptions, immutable-ID grants and revocable, scoped supervisors.
+- One fact check per user per broadcast, one research request per user per UTC day. Verified owner/streamer exemptions, immutable-ID grants and revocable, scoped supervisors.
 - Bounded five-minute chat activity aggregates, 30-day raw chat retention, limited same-stream conversation context, deletion/opt-out and a private-data boundary.
 - Mario Kart session mode, roster, typo-tolerant nicknames, two independent first-place reports or operator confirmation, round advancement and leaderboards.
 - Text-only notification watches and scheduled reminders stored in SQLite, posted through the paced chat connection.

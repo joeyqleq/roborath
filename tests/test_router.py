@@ -65,7 +65,8 @@ class RouterTests(unittest.TestCase):
 
     def test_routing_and_cost_record(self):
         http=DummyHTTP()
-        r=Router(self.env,self.db,http,available_models={"NVIDIA":{"nvidia/nemotron-3-super-120b-a12b"}})
+        self.env["NVIDIA_VERIFIED"]="true"
+        r=Router(self.env,self.db,http,available_models={"NVIDIA":{"nvidia/nemotron-3-super-120b-a12b"},"MERGE":set(),"NEBIUS":set()})
         answer=asyncio.run(r.complete("hey!",max_tokens=45))
         self.assertEqual(answer.provider,"NVIDIA")
         self.assertIn("quick answer",answer.text)
@@ -76,10 +77,10 @@ class RouterTests(unittest.TestCase):
         http=DummyHTTP(fail_first=True)
         r=Router(self.env,self.db,http)
         answer=asyncio.run(r.complete("hello"))
-        self.assertEqual(answer.provider,"MERGE")
+        self.assertEqual(answer.provider,"NEBIUS")
         self.assertEqual(len(http.calls),2)
-        self.assertGreater(self.db.reserved_total("MERGE"),0)
-        self.assertEqual(self.db.reserved_total("NVIDIA"),0)
+        self.assertGreater(self.db.reserved_total("NEBIUS"),0)
+        self.assertEqual(self.db.reserved_total("MERGE"),0)
 
     def test_https_only(self):
         self.env["NVIDIA_BASE_URL"]="http://localhost:9999/v1"

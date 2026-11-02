@@ -6,7 +6,7 @@ RoboRath participates in twitch.tv/rath_bone as the normal Twitch user `roborath
 
 | Command | Access | Effect |
 |---|---|---|
-| `!fact <claim>`, `!check <claim>` | All | Two requests per user per Twitch stream; max one answer message |
+| `!fact <claim>`, `!check <claim>` | All | One request per user per Twitch stream; max one answer message |
 | `!research <topic>` | All | One request per user per UTC day; up to two messages |
 | `hey roborath, fact <claim>` | All | Explicit natural-language fact-check invocation |
 | `@roborath research <topic>` | All | Explicit natural-language research invocation |

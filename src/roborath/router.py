@@ -35,21 +35,19 @@ WINDOW = {"NEBIUS": "lifetime", "MERGE": "month", "NVIDIA": "month"}
 # This is not an authorization policy; only allows routing to preselected models.
 ROUTES = {
     "chat": [
-        ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
         ("MERGE", "amazon/nova-micro"),
         ("NEBIUS", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
+        ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
     ],
     "mario": [
         ("MERGE", "amazon/nova-micro"),
         ("NEBIUS", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
     ],
     "research": [
-        ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
         ("NEBIUS", "Qwen/Qwen3.5-397B-A17B"),
         ("NEBIUS", "NousResearch/Hermes-4-405B"),
     ],
     "admin": [
-        ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
         ("NEBIUS", "NousResearch/Hermes-4-405B"),
     ],
 }
@@ -154,6 +152,12 @@ class Router:
         self.available_models=available_models or {}
 
     def _get(self,provider):
+        if str(self.env.get(provider+"_ENABLED", "true")).lower() in ("false","0","off","no"):
+            return None
+        # NVIDIA's catalog succeeds but live inference did not pass validation.
+        # Require an explicit ready flag before routing any traffic to it.
+        if provider=="NVIDIA" and str(self.env.get("NVIDIA_VERIFIED", "false")).lower()!="true":
+            return None
         base=self.env.get(provider+"_BASE_URL","").rstrip("/")
         key=self.env.get(provider+"_API_KEY","")
         p=urlsplit(base)
@@ -171,7 +175,7 @@ class Router:
             yield provider,model,info
 
     async def complete(self,prompt:str,tier="chat",sources:str="",actor_id="",owner_id="",origin="twitch",
-                       max_tokens:int=180) -> Response:
+                       max_tokens:int=180,quality="fast") -> Response:
         authorize(tier,actor_id,owner_id,origin)
         if len(prompt)>14000 or not prompt.strip():raise ValueError("prompt is empty or too long")
         if requires_evidence(tier) and not sources.strip():
@@ -184,7 +188,12 @@ class Router:
             "admin":"you are a private Mattermost administrative assistant. Never claim you executed an action unless a verified approved tool returned success. Propose precise actions for owner confirmation.",
         }[tier]
         last_error=None
-        for provider,model,(base,key) in self.candidates(tier):
+        selections=list(self.candidates(tier))
+        if tier=="chat" and quality=="strong":
+            preferred=self._get("NEBIUS")
+            if preferred:
+                selections=[("NEBIUS","Qwen/Qwen3-235B-A22B-Instruct-2507",preferred)]+selections
+        for provider,model,(base,key) in selections:
             request_id=uuid.uuid4().hex
             estimated=estimate_usd(provider,model,len(prompt)+len(sources)+len(instruction),max_tokens)
             if not self.ledger.reserve(request_id,provider,estimated):
@@ -207,7 +216,7 @@ class Router:
                 out=int(usage.get("completion_tokens") or max_tokens)
                 in_rate,out_rate=PRICE.get(model,OTHER_PRICE_CEILING.get(provider,(3.,12.)))
                 cost=(inp*in_rate+out*out_rate)/1_000_000
-                self.ledger.finish(request_id,min(estimated,cost if usage else estimated))
+                self.ledger.finish(request_id,cost if usage else estimated)
                 return Response(answer.strip(),provider,model,cost,inp,out)
             except (httpx.HTTPError,KeyError,ValueError,TypeError,IndexError) as exc:
                 self.ledger.refund(request_id)

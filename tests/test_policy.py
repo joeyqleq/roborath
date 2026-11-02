@@ -17,8 +17,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(parse_public("@RoboRath fact hello"), ("fact","hello"))
 
     def test_fact_quota_and_stream_reset(self):
-        for i in range(2):
-            self.assertTrue(self.policy.check_or_reserve("444",f"m{i}","fact","stream1").allowed)
+        self.assertTrue(self.policy.check_or_reserve("444","m0","fact","stream1").allowed)
         self.assertFalse(self.policy.check_or_reserve("444","m3","fact","stream1").allowed)
         self.assertTrue(self.policy.check_or_reserve("444","m4","fact","stream2").allowed)
 
@@ -45,7 +44,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(self.policy.can_manage("444","fact_grant"))
         self.assertFalse(self.policy.can_manage("444","research_grant"))
         self.policy.grant_extra("444","555","fact","stream:stream1",2)
-        for i in range(4):
+        for i in range(3):
             self.assertTrue(self.policy.check_or_reserve("555",f"q{i}","fact","stream1").allowed)
         self.assertFalse(self.policy.check_or_reserve("555","q5","fact","stream1").allowed)
         self.policy.delegate("12345","444","fact_grant",False)

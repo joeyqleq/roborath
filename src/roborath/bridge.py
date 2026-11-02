@@ -10,6 +10,8 @@ from formatting import messages
 from shortlinks import shorten_sources
 from mario import Mario
 from notifications import Notifications
+from router import Router, Ledger
+from formatting import compress_for_chat, without_raw_links
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
@@ -65,6 +67,11 @@ class Bridge:
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
         self.mario = Mario(self.db)
         self.notifications = Notifications(self.db)
+        self.router = None
+        # Routing credentials are supplied only in a protected runtime env, never from viewer input.
+        if any(os.getenv(x+"_API_KEY") and os.getenv(x+"_BASE_URL") for x in ("NVIDIA","NEBIUS","MERGE")):
+            self.router = Router(dict(os.environ), Ledger(os.getenv("ROBORATH_ROUTER_LEDGER", "/var/lib/roborath/spend.sqlite3")))
+
 
     async def twitch_api(self, method, path, data=None):
         r = await self.http.request(method, "https://api.twitch.tv/helix"+path,
@@ -243,7 +250,7 @@ class Bridge:
             if cmd.endswith("2"):
                 text="roborath: !privacy, !forgetme, !optin, !rr id. operator: !rr grant <id> fact|research <1-20>, !rr supervisor add <id> <capability>."
             else:
-                text="roborath: !fact <claim> (2/stream), !research <topic> (1/day). or 'hey roborath, fact ...'. try !rr help 2."
+                text="roborath: !fact <claim> (1/stream), !research <topic> (1/day). or 'hey roborath, fact ...'. try !rr help 2."
             await self.twitch_reply(text,mid)
             return
         remind_match = re.fullmatch(r"!rr\s+remind\s+(\d{1,4}[mhd])\s+(.+)",cmd,re.I)
@@ -288,6 +295,24 @@ class Bridge:
                 last_user_call[user]=now
                 await self.twitch_reply(result,mid)
                 return
+        chat_match=re.fullmatch(
+            r"(?:!ask|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+(.{2,700})",cmd,re.I)
+        if chat_match:
+            if self.router is None:return
+            last_user_call[user]=now
+            async with gate:
+                try:
+                    response=await self.router.complete(
+                       clean_request(chat_match.group(1)),tier="mario" if self.mario.active(stream) else "chat",
+                       max_tokens=105)
+                    reply=compress_for_chat(without_raw_links(response.text))
+                    await self.twitch_reply(reply,mid)
+                    self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
+                                    ("chat",reply,"answered",mid))
+                    self.db.commit()
+                except Exception as err:
+                    LOG.warning("conversational model error %s",type(err).__name__)
+            return
         parsed=parse_public(raw)
         if not parsed:return
         capability,question=parsed

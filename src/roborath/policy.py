@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-BASE_LIMITS = {"fact": 2, "research": 1}
+BASE_LIMITS = {"fact": 1, "research": 1}
 SUPERVISOR_CAPABILITIES = {"fact_grant", "research_grant", "mario_manage", "trigger_manage"}
 PUBLIC_CAPABILITIES = {"fact", "research", "mario_read", "help"}
 
