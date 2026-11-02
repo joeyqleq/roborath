@@ -11,6 +11,7 @@ from shortlinks import shorten_sources
 from mario import Mario
 from notifications import Notifications
 from router import Router, Ledger
+from decision import choose_quality
 from formatting import compress_for_chat, without_raw_links
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
@@ -302,9 +303,12 @@ class Bridge:
             last_user_call[user]=now
             async with gate:
                 try:
+                    question=clean_request(chat_match.group(1))
+                    quality=await choose_quality(question,self.http,
+                        enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","true").lower()=="true")
                     response=await self.router.complete(
-                       clean_request(chat_match.group(1)),tier="mario" if self.mario.active(stream) else "chat",
-                       max_tokens=105)
+                       question,tier="mario" if self.mario.active(stream) else "chat",
+                       max_tokens=105,quality=quality)
                     reply=compress_for_chat(without_raw_links(response.text))
                     await self.twitch_reply(reply,mid)
                     self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
