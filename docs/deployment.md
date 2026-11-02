@@ -25,6 +25,25 @@ The CLI prompts for the client secret with hidden input, validates the logged-in
 
 5. Privately transfer the OAuth file to ORA3 through your authenticated SSH/Tailscale connection; **do not** paste it in chat. Copy it to the private destination and assign ownership to `roborath:roborath`. Ensure its parent directory is mode 0700.
 
+## Current ORA1 relay provisioning (2026-11-02)
+
+- **Private channel exists:** `p5n-net:roborath-relay` (channel ID `9h5zep771i8umnacsdpt6nfosy`).
+- **Channel membership verified:** owner `p5n` and fact-check agent `greenthumb-ai` (user ID `d66mch8hwtrfzdj795wgctzxra`).
+- **Bot account missing:** the separate non-admin `roborath-relay` bot has not yet been created.
+- The Mattermost CLI on ORA1 returns **“This command cannot be run in local mode”** for `mmctl --local bot create`. Do not bypass this with server or database writes. Creation requires an authenticated Mattermost system-admin UI/API session.
+
+### Finish via the supported Mattermost administrator UI
+
+1. Sign in to `https://matter.greenthumb.lol` as the existing system administrator `p5n`.
+2. Open **System Console → Integrations → Bot Accounts**, then create bot username **`roborath-relay`** with display name **RoboRath Relay**. Leave it a regular non-admin account, not a system administrator.
+3. Generate and securely retain its access token. Do **not** paste it in Twitch, GitHub, or a chat message.
+4. Add the bot to the `p5n-net` team and the private `roborath-relay` channel, alongside `p5n` and `greenthumb-ai`. No other users or Admin AI.
+5. Enter the bot token locally in the owner-only ORA3 `/home/jq/credentials.env` as `MATTERMOST_RELAY_BOT_TOKEN`, and set `MATTERMOST_RELAY_CHANNEL_ID=9h5zep771i8umnacsdpt6nfosy`.
+6. Run `sudo python3 /home/jq/projects/roborath/deploy/provision-runtime.py` to update the private `/etc/roborath.env` from the master. This does not activate a service.
+7. Before enabling Twitch posting, use the new token to verify the bot account identity and private channel membership, send one harmless internal test to the FactCheck agent, confirm an actual reply, and validate the one-fact/stream research quotas. Only then enable `roborath-irc.service`.
+
+Twitch device authorization has **already completed and been verified** as `roborath` (Twitch user ID `1591621882`); OAuth is installed as a private file at `/var/lib/roborath/private/oauth.json` on ORA3. This step does not need repeating.
+
 ## C. Mattermost isolation
 
 - Create a distinct non-admin Mattermost **bot** for public Twitch requests.
