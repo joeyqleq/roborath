@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
+from prompts import CONVERSATION, MARIO, RESEARCH, ADMIN
 
 # Published approximate Nebius list prices, USD/1M input and output tokens.
 # Revise against provider billing before increasing budgets.
@@ -181,12 +182,8 @@ class Router:
         if requires_evidence(tier) and not sources.strip():
             raise ValueError("research requires verified source evidence; model output alone is not a web search")
         max_tokens=min(max(32,max_tokens),400)
-        instruction={
-            "chat":"you are RoboRath in a political satire Twitch chat. answer the request naturally, briefly and accurately. informal lowercase is okay. avoid canned AI intros. don't invent facts or sources.",
-            "mario":"you are RoboRath in Mario Kart mode. concise, playful Nintendo Switch advice. never invent stream scores; scores come from database.",
-            "research":"fact-check or explain the user claim using ONLY the supplied retrieved evidence. say uncertain if sources conflict; never fabricate citations or current events. answer within Twitch 420-byte or 2-message limit.",
-            "admin":"you are a private Mattermost administrative assistant. Never claim you executed an action unless a verified approved tool returned success. Propose precise actions for owner confirmation.",
-        }[tier]
+        instruction={"chat":CONVERSATION,"mario":MARIO,"research":RESEARCH,
+                     "admin":ADMIN}[tier]
         last_error=None
         selections=list(self.candidates(tier))
         if tier=="chat" and quality=="strong":
