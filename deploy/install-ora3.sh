@@ -19,8 +19,10 @@ python3 -m venv /opt/roborath/.venv
    'httpx>=0.27,<1' 'websockets>=14,<17'
 install -m 0644 "$SOURCE_DIR/deploy/roborath-irc.service" /etc/systemd/system/roborath-irc.service
 systemctl daemon-reload
-systemctl disable --now roborath-irc.service >/dev/null 2>&1 || true
-echo "Source and service installed. RoboRath remains DISABLED."
+# Preserve an already active service across future source installation.
+# New installs remain disabled until an operator explicitly enables them.
+echo "Source and systemd unit staged; existing service enablement preserved."
+systemctl is-enabled roborath-irc.service 2>/dev/null || true
 if [[ -e /etc/roborath.env ]]; then
   mode=$(stat -c %a /etc/roborath.env)
   if [[ "$mode" != "600" ]]; then
@@ -29,4 +31,5 @@ if [[ -e /etc/roborath.env ]]; then
 else
   echo "Create /etc/roborath.env mode 600 AFTER provisioning rotated OAuth and relay account."
 fi
-echo "Do not enable until the account IDs, token refresh and private Mattermost relay are verified."
+echo "Conversation-only mode can run with verified Twitch OAuth and model router."
+echo "Fact/research require a separate verified non-admin Mattermost relay and opt-in."

@@ -1,3 +1,24 @@
+## Current operational state — 2026-11-08
+
+RoboRath is enabled on ORA3 as a **conversation and Mario Kart capable Twitch bot**.
+The dedicated Twitch OAuth token was refreshed and identity-checked against
+`roborath` (immutable user ID `1591621882`). The systemd service
+`roborath-irc.service` is active and enabled, and IRC connected to
+`rath_bone` as a normal viewer. A synthetic inbound `!ask` message passed
+through the real external model router and generated a valid response.
+
+The private Mattermost relay does not yet have a dedicated bot account/token.
+Fact/research deliberately fail closed before quota consumption.
+`ROBORATH_FACT_RELAY_ENABLED` defaults to false, and should only be enabled
+after testing the restricted bot account and thread response. Admin AI is not
+exposed to public Twitch messages.
+
+**Do not run `systemctl disable --now roborath-irc` to provision the future relay.**
+The installer now preserves existing service enablement; restart the service
+only for approved code/config changes. Never paste live provider credentials
+into Git or logs. Read-only check:
+`systemctl status roborath-irc.service`.
+
 # ORA3 deployment / go-live checklist
 
 This repo intentionally leaves the bot OFF until authorized, validated, and tested.
