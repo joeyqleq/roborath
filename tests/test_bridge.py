@@ -8,6 +8,11 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="99999"
     import bridge
     from bridge import Bridge
+    # Mock the fully configured relay for its integration test. Runtime
+    # configuration without a real relay must fail closed separately.
+    bridge.MM_TOKEN = "test-only-placeholder"
+    bridge.MM_CHANNEL = "test-only-channel"
+    os.environ["ROBORATH_FACT_RELAY_ENABLED"] = "true"
     async def mock_shortlinks(text, client):
         return text.replace("https://example.org", "https://is.gd/mock")
     bridge.shorten_sources = mock_shortlinks

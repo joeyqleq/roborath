@@ -252,7 +252,8 @@ class Bridge:
             if cmd.endswith("2"):
                 text="roborath: !privacy, !forgetme, !optin, !rr id. operator: !rr grant <id> fact|research <1-20>, !rr supervisor add <id> <capability>."
             else:
-                text="roborath: !fact <claim> (1/stream), !research <topic> (1/day). or 'hey roborath, fact ...'. try !rr help 2."
+                text=("roborath: !ask <question>, hey roborath: <question>, !rr mario scores. "
+                      +("!fact 1/stream, !research 1/day." if MM_TOKEN and MM_CHANNEL else "fact/research temporarily offline."))
             await self.twitch_reply(text,mid)
             return
         remind_match = re.fullmatch(r"!rr\s+remind\s+(\d{1,4}[mhd])\s+(.+)",cmd,re.I)
@@ -320,6 +321,11 @@ class Bridge:
             return
         parsed=parse_public(raw)
         if not parsed:return
+        if not (MM_TOKEN and MM_CHANNEL and
+                os.getenv("ROBORATH_FACT_RELAY_ENABLED", "false").lower()=="true"):
+            last_user_call[user]=now
+            await self.twitch_reply("fact/research isn't connected yet. !ask <question> works now.",mid)
+            return
         capability,question=parsed
         # Explicit fail-closed until immutable Twitch owner/streamer IDs resolve.
         if self.policy is None:return

@@ -219,9 +219,12 @@ class IRCAdapter:
 
 async def main():
     required = ["TWITCH_IRC_NICK", "TWITCH_CHANNEL_LOGIN",
-                "MATTERMOST_BOT_TOKEN", "MATTERMOST_CHANNEL_ID",
                 "ROBORATH_OWNER_TWITCH_USER_ID",
                 "ROBORATH_STREAMER_TWITCH_USER_ID"]
+    # Allow opt-in conversational/Mario mode before a distinct, nonadmin
+    # Mattermost relay account exists. This never enables fact/research.
+    if os.getenv("ROBORATH_FACT_RELAY_ENABLED", "false").lower() == "true":
+        required += ["MATTERMOST_BOT_TOKEN", "MATTERMOST_CHANNEL_ID"]
     required += (["TWITCH_CLIENT_ID","TWITCH_CLIENT_SECRET"] if TOKEN_FILE
                  else ["TWITCH_IRC_TOKEN"])
     missing = [k for k in required if not os.getenv(k)]
