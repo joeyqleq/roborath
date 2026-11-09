@@ -371,9 +371,9 @@ class Bridge:
         if re.fullmatch(r"!rr\s+help(?:\s+[12])?",cmd,re.I):
             last_user_call[user]=now
             if cmd.endswith("2"):
-                text="roborath: !search <query> for sourced web lookup, !privacy, !forgetme, !optin, !rr id. operator: !rr grant <id> fact|research <1-20>."
+                text="RoboRath menu 2/2: try !search latest space news; !privacy; !forgetme; !optin; !rr id. Owner controls: !rr doctor or !rr help 2."
             else:
-                text=("roborath: !ask <question>, !search <query> (web), !rr mario scores. "
+                text=("RoboRath menu 1/2: try !ask tell me a joke about politicians; !search today in tech; !rr mario scores; !rr help 2. "
                       +("!fact 1/stream, !research 1/day." if MM_TOKEN and MM_CHANNEL else "dedicated fact/research offline."))
             await self.twitch_reply(text,mid)
             return
@@ -439,9 +439,9 @@ class Bridge:
         incomplete=re.fullmatch(r"!(ask|search|fact|check|research)\s*",cmd,re.I)
         if incomplete:
             name=incomplete[1].lower()
-            sample="!ask <question>" if name=="ask" else (
-                "!search <topic>" if name=="search" else
-                "!research <topic>" if name=="research" else "!fact <claim>")
+            sample="!ask Tell me a political joke" if name=="ask" else (
+                "!search latest news about Mars" if name=="search" else
+                "!research history of Maoism" if name=="research" else "!fact the Earth is flat")
             await self.twitch_reply("Usage: "+sample,mid)
             self.db.execute("UPDATE chat_events SET command=?,status='usage_error' WHERE message_id=?",
                             (name,mid))
@@ -557,7 +557,7 @@ class Bridge:
         if not (MM_TOKEN and MM_CHANNEL and
                 os.getenv("ROBORATH_FACT_RELAY_ENABLED", "false").lower()=="true"):
             last_user_call[user]=now
-            await self.twitch_reply("fact/research isn't connected yet. !ask <question> works now.",mid)
+            await self.twitch_reply("fact/research is unavailable at the moment. Try !ask followed by your question.",mid)
             return
         capability,question=parsed
         # Explicit fail-closed until immutable Twitch owner/streamer IDs resolve.
