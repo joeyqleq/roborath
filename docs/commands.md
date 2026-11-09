@@ -82,8 +82,8 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
 
 ## Short-term context and answer scenarios (2026-11-09)
 
-- Same Twitch viewer and same stream only: last six answered conversation/search
-  turns from the past 45 minutes are included as **untrusted dialogue history**.
+- Same Twitch viewer and same stream only: last eight answered conversation/search
+  turns from the past five hours are included as **untrusted dialogue history**.
   Messages from another viewer or stream are never included. No claim of
   permanent personal memory. Turns are serialized per viewer.
 - Operator can repeat a deterministic letter-count question unprefixed within
@@ -99,7 +99,7 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
   Other @handles can be resolved through the public YouTube channel page.
   Generic search snippets remain a discovery fallback, not verified facts.
 - Subsequent `!ask tell me the title name` recovers the same viewer's recent
-  video search (20 minute maximum) and rechecks the official source.
+  video search (five hour maximum) and rechecks the official source.
 - Help/control messages now receive an outbound-queue audit status; standalone
   unaddressed chatter is tagged ignored_unaddressed. IRC NOTICE messages are
   surfaced as categorized warning events. A successful websocket send is

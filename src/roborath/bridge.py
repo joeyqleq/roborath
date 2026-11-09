@@ -132,7 +132,7 @@ class Bridge:
             items.append("Earlier answer: " + (answer or "").replace("\n", " ")[:320])
         return "\n".join(items)
 
-    def context_rows(self, twitch_user_id:str, stream_id:str, limit:int=7):
+    def context_rows(self, twitch_user_id:str, stream_id:str, limit:int=10):
         """Viewer- and stream-scoped answered dialogue, including web searches."""
         return self.db.execute(
             """SELECT request_text,answer_text,command FROM chat_events
@@ -141,7 +141,7 @@ class Bridge:
                  AND created_utc >= ?
                ORDER BY created_utc DESC LIMIT ?""",
             (twitch_user_id,stream_id,
-             (datetime.now(timezone.utc)-timedelta(minutes=45)).isoformat(),
+             (datetime.now(timezone.utc)-timedelta(hours=5)).isoformat(),
              min(max(limit,0),12))).fetchall()
 
     def previous_search(self, twitch_user_id:str, stream_id:str):
@@ -153,7 +153,7 @@ class Bridge:
         if not row:return ""
         try:
             timestamp=datetime.fromisoformat(row[1])
-            if (datetime.now(timezone.utc)-timestamp).total_seconds()>1200:
+            if (datetime.now(timezone.utc)-timestamp).total_seconds()>18000:
                 return ""
         except (TypeError,ValueError):
             return ""
@@ -458,7 +458,7 @@ class Bridge:
                             response=await self.router.complete(
                                question,tier="chat",
                                sources="",actor_id=user,actor_login=login,actor_role=role,
-                               conversation_context=history_context(prior,limit=6),
+                               conversation_context=history_context(prior,limit=8),
                                max_tokens=165,quality=quality)
                             reply=sentence_clip(without_raw_links(response.text),budget=370)
                     await self.twitch_reply(reply,mid)
