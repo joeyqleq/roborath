@@ -24,3 +24,6 @@ class FormatTests(unittest.TestCase):
     def test_no_empty(self):
         self.assertTrue(messages("","fact")[0])
 if __name__=='__main__': unittest.main()
+
+from formatting import sentence_clip
+assert sentence_clip("First sentence. "+"Second is a lot longer than expected. "*15, 90).endswith(".")

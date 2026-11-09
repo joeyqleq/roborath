@@ -12,8 +12,9 @@ from mario import Mario
 from notifications import Notifications
 from router import Router, Ledger
 from decision import choose_quality
+from web_lookup import lookup, needs_lookup
 from prompts import FACTCHECK, RESEARCH
-from formatting import compress_for_chat, without_raw_links
+from formatting import compress_for_chat, without_raw_links, sentence_clip
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
 from websockets.asyncio.client import connect
 
@@ -250,10 +251,10 @@ class Bridge:
         if re.fullmatch(r"!rr\s+help(?:\s+[12])?",cmd,re.I):
             last_user_call[user]=now
             if cmd.endswith("2"):
-                text="roborath: !privacy, !forgetme, !optin, !rr id. operator: !rr grant <id> fact|research <1-20>, !rr supervisor add <id> <capability>."
+                text="roborath: !search <query> for sourced web lookup, !privacy, !forgetme, !optin, !rr id. operator: !rr grant <id> fact|research <1-20>."
             else:
-                text=("roborath: !ask <question>, hey roborath: <question>, !rr mario scores. "
-                      +("!fact 1/stream, !research 1/day." if MM_TOKEN and MM_CHANNEL else "fact/research temporarily offline."))
+                text=("roborath: !ask <question>, !search <query> (web), !rr mario scores. "
+                      +("!fact 1/stream, !research 1/day." if MM_TOKEN and MM_CHANNEL else "dedicated fact/research offline."))
             await self.twitch_reply(text,mid)
             return
         remind_match = re.fullmatch(r"!rr\s+remind\s+(\d{1,4}[mhd])\s+(.+)",cmd,re.I)
@@ -300,21 +301,56 @@ class Bridge:
                 return
         chat_match=re.fullmatch(
             r"(?:!ask|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+(.{2,700})",cmd,re.I)
-        if chat_match:
+        search_match=re.fullmatch(r"!search\s+(.{2,700})",cmd,re.I)
+        if chat_match or search_match:
             if self.router is None:return
             last_user_call[user]=now
             async with gate:
                 try:
-                    question=clean_request(chat_match.group(1))
-                    quality=await choose_quality(question,self.http,
-                        enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","true").lower()=="true")
-                    response=await self.router.complete(
-                       question,tier="mario" if self.mario.active(stream) else "chat",
-                       max_tokens=105,quality=quality)
-                    reply=compress_for_chat(without_raw_links(response.text))
+                    question=clean_request((search_match or chat_match).group(1))
+                    web_enabled=os.getenv("ROBORATH_WEB_SEARCH_ENABLED","true").lower()=="true"
+                    if "web search" in question.casefold() and any(
+                        t in question.casefold() for t in ("working","enabled","available")):
+                        explanation=("web lookup is enabled for current questions and !search requests."
+                            if web_enabled else "web lookup is disabled by configuration.")
+                        explanation+=" dedicated !fact/!research is still offline until its Mattermost relay is verified."
+                        await self.twitch_reply(explanation,mid)
+                        self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
+                                        ("chat",explanation,"answered",mid))
+                        self.db.commit()
+                        return
+                    sources,source_domain=("", "")
+                    wants_search=bool(search_match or needs_lookup(question))
+                    if web_enabled and wants_search:
+                        sources,source_domain=await lookup(question,self.http,forced=bool(search_match))
+                    if wants_search and not sources and (search_match or "weather" in question.casefold() or
+                            "right now" in question.casefold() or "latest" in question.casefold()):
+                        reply="live web lookup is unavailable right now. i won't make up current results."
+                    elif source_domain=="open-meteo.com" and sources:
+                        reply=sources  # Deterministic live weather; never ask model to reinterpret WMO codes.
+                    elif sources:
+                        # DDGS exposes result TITLES, not verified full articles.
+                        # A model fabricated an F1 winner from those snippets;
+                        # show source links instead of manufacturing factual claims.
+                        linked=await shorten_sources(sources,self.http,limit=2)
+                        reply=sentence_clip(linked,budget=370)
+                    else:
+                        quality=await choose_quality(question,self.http,
+                            enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","true").lower()=="true")
+                        role=("owner" if user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") else
+                              "streamer" if user==os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID") else "viewer")
+                        response=await self.router.complete(
+                           question,tier="mario" if self.mario.active(stream) else "chat",
+                           sources=sources,actor_id=user,actor_login=login,actor_role=role,
+                           max_tokens=130,quality=quality)
+                        reply=sentence_clip(without_raw_links(response.text),budget=370)
+                        if source_domain and source_domain.lower() not in reply.lower():
+                            suffix=" [src: "+source_domain+"]"
+                            # Leave room for sender prefix and enforced IRC UTF-8 limit.
+                            reply=reply.encode("utf-8")[:max(1,385-len(suffix))].decode("utf-8","ignore").rstrip()+suffix
                     await self.twitch_reply(reply,mid)
                     self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
-                                    ("chat",reply,"answered",mid))
+                                    ("search" if search_match else "chat",reply,"answered",mid))
                     self.db.commit()
                 except Exception as err:
                     LOG.warning("conversational model error %s",type(err).__name__)

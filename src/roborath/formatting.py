@@ -47,6 +47,21 @@ def compress_for_chat(text: str, budget: int = MAX_IRC_BYTES) -> str:
             text = re.sub(re.escape(original),short,text, flags=re.I)
     return utf8_clip(text,budget)
 
+def sentence_clip(text: str, budget: int = 365) -> str:
+    """Prefer complete sentences over Twitch's confusing mid-word truncation."""
+    clean = humanize(text)
+    if len(clean.encode("utf-8")) <= budget:
+        return clean
+    short = clean.encode("utf-8")[:budget].decode("utf-8", "ignore")
+    ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", short)]
+    if ends and ends[-1] > int(budget * .43):
+        return short[:ends[-1]].strip()
+    last = short.rfind(" ")
+    if last > int(budget * .5):
+        return short[:last].rstrip(" .,;:") + "..."
+    return utf8_clip(clean, budget)
+
+
 def without_raw_links(text: str, replacement: str = "[source link unavailable]") -> str:
     """Never expose long raw URLs in Twitch chat when shortener is unavailable."""
     return URL.sub(replacement, str(text))

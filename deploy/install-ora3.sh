@@ -16,7 +16,7 @@ cp -a "$SOURCE_DIR/pyproject.toml" /opt/roborath/
 chown -R root:root /opt/roborath/src /opt/roborath/pyproject.toml
 python3 -m venv /opt/roborath/.venv
 /opt/roborath/.venv/bin/python -m pip install --quiet --disable-pip-version-check \
-   'httpx>=0.27,<1' 'websockets>=14,<17'
+   'httpx>=0.27,<1' 'websockets>=14,<17' 'ddgs>=9,<11'
 install -m 0644 "$SOURCE_DIR/deploy/roborath-irc.service" /etc/systemd/system/roborath-irc.service
 systemctl daemon-reload
 # Preserve an already active service across future source installation.

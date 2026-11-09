@@ -24,8 +24,14 @@ with tempfile.TemporaryDirectory() as tmp:
     async def test():
         bridge = IRCAdapter()
         bridge.ws = FakeSocket()
+        # The parent snippet no longer renders as a mini-thread by default.
+        bridge.bridge.db.execute(
+            "INSERT INTO chat_events(message_id,stream_id,twitch_user_id,twitch_login,created_utc,request_text) "
+            "VALUES ('abc-123','stream','1234','viewer','2026-11-09T12:00:00Z','!ask hello')")
+        bridge.bridge.db.commit()
         await bridge.reply("Evidence suggests the claim is false.", "abc-123")
-        assert bridge.ws.sent[0].startswith("@reply-parent-msg-id=abc-123 PRIVMSG #examplechannel :")
+        assert bridge.ws.sent[0].startswith("PRIVMSG #examplechannel :@viewer ")
+        assert "@reply-parent-msg-id=" not in bridge.ws.sent[0]
         assert "false." in bridge.ws.sent[0]
         bridge.room_id = ""
         assert (await bridge.stream_id()).startswith("examplechannel-irc-day-")

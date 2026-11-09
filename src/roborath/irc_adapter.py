@@ -28,6 +28,7 @@ CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "").strip()
 CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "").strip()
 TOKEN_FILE = os.getenv("TWITCH_TOKEN_FILE", "").strip()
 MIN_REPLY_INTERVAL = max(2, int(os.getenv("GT_GLOBAL_REPLY_COOLDOWN_SECONDS", "12")))
+THREADED_REPLIES = os.getenv("ROBORATH_THREADED_REPLIES", "false").lower() == "true"
 
 
 def parse_tags(source):
@@ -77,6 +78,7 @@ class IRCAdapter:
         self.last_send = 0.0
         self.room_id = ""
         self.stream_cache = ("", 0.0)
+        self.token_checked_until = 0.0
         self.bridge.twitch_reply = self.reply
         self.bridge.stream_id = self.stream_id
 
@@ -107,6 +109,15 @@ class IRCAdapter:
     async def stream_id(self):
         if time.monotonic() < self.stream_cache[1]:
             return self.stream_cache[0]
+        # IRC may remain connected for hours after its initial OAuth refresh.
+        # The independent Helix request must use a CURRENT bearer token.
+        if TOKEN_FILE and time.monotonic() >= self.token_checked_until:
+            try:
+                self.token, _ = await access_token(CLIENT_ID, CLIENT_SECRET,
+                                                   TOKEN_FILE, required_login=NICK)
+                self.token_checked_until = time.monotonic() + 300
+            except (httpx.HTTPError, PermissionError, ValueError, KeyError) as exc:
+                LOG.warning("Stream auth refresh unavailable (%s)",type(exc).__name__)
         if self.room_id and CLIENT_ID:
             try:
                 async with httpx.AsyncClient(timeout=8) as http:
@@ -132,8 +143,16 @@ class IRCAdapter:
     async def reply(self, answer, message_id):
         if not self.ws:
             raise ConnectionError("IRC socket not connected")
-        # Twitch IRC messages are limited; enforce UTF-8 byte limit.
+        # Plain channel replies avoid Twitch's visually confusing mini-thread.
+        # Prefix the verified sender's login instead of making the model guess.
         answer = re.sub(r"\s+", " ", answer).strip()
+        if not THREADED_REPLIES and message_id:
+            row = self.bridge.db.execute(
+                "SELECT twitch_login FROM chat_events WHERE message_id=?",
+                (message_id,)).fetchone()
+            login = row[0] if row else ""
+            if re.fullmatch(r"[a-z0-9_]{3,25}", login or "", re.I) and not answer.lower().startswith("@"+login.lower()):
+                answer = "@"+login+" "+answer
         encoded = answer.encode("utf-8")[:430]
         answer = encoded.decode("utf-8", errors="ignore")
         if not answer:
@@ -143,7 +162,7 @@ class IRCAdapter:
             if remaining > 0:
                 await asyncio.sleep(remaining)
             reference = message_id if re.fullmatch(r"[A-Za-z0-9-]{1,90}", message_id) else ""
-            tag = "@reply-parent-msg-id=" + reference + " " if reference else ""
+            tag = "@reply-parent-msg-id=" + reference + " " if reference and THREADED_REPLIES else ""
             await self.ws.send(tag + "PRIVMSG #" + CHANNEL + " :" + answer + "\r\n")
             self.last_send = time.monotonic()
 

@@ -39,3 +39,21 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
 - Chat archive and aggregates are accessible only to permitted operators; a graphical Mattermost console is not yet installed.
 - Source URLs are shortened by a third-party shortening service where available. On failure, the bot suppresses a raw long URL.
 - This document specifies the current **staged source**; live Twitch chat and Mattermost relaying remain untested.
+
+## Conversation and web lookup (November 9, 2026)
+
+- `!ask <question>`: general conversation or Mario Kart knowledge. Verified
+  sender identity is supplied separately, so `roborath` is the bot's own name,
+  `joeyleq` is the operator and `rath_bone`/Rath is the streamer.
+- Weather and clearly time-sensitive questions in `!ask` use a keyless
+  public lookup where available. Weather uses timestamped Open-Meteo conditions
+  and deterministic WMO-code descriptions.
+- `!search <query>`: fetch public web search result titles with short links.
+  Search results are NOT independently verified complete articles, so the bot
+  does not invent winners, dates or allegations from snippets.
+- Replies are plain chat messages addressed to the verified sender
+  (`@username`), rather than visually confusing Twitch mini-threads.
+  `ROBORATH_THREADED_REPLIES=true` restores Twitch reply tags if desired.
+- Search is best-effort and may be rate limited. `ROBORATH_WEB_SEARCH_ENABLED=false`
+  disables external web lookup. The separate `!fact`/`!research` specialist
+  remains fail-closed until its restricted Mattermost relay is tested.

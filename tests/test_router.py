@@ -14,9 +14,10 @@ class DummyResponse:
 
 class DummyHTTP:
     def __init__(self,fail_first=False):
-        self.calls=[];self.fail_first=fail_first
+        self.calls=[];self.requests=[];self.fail_first=fail_first
     async def post(self,url,headers,json,timeout):
         self.calls.append((url,json["model"],json["max_tokens"]))
+        self.requests.append(json)
         if self.fail_first and len(self.calls)==1:return DummyResponse({},500)
         return DummyResponse({"choices":[{"message":{"content":"hey chat, quick answer."}}],
             "usage":{"prompt_tokens":15,"completion_tokens":10}})
@@ -77,10 +78,28 @@ class RouterTests(unittest.TestCase):
         http=DummyHTTP(fail_first=True)
         r=Router(self.env,self.db,http)
         answer=asyncio.run(r.complete("hello"))
-        self.assertEqual(answer.provider,"NEBIUS")
+        self.assertEqual(answer.provider,"MERGE")
         self.assertEqual(len(http.calls),2)
-        self.assertGreater(self.db.reserved_total("NEBIUS"),0)
-        self.assertEqual(self.db.reserved_total("MERGE"),0)
+        self.assertGreater(self.db.reserved_total("MERGE"),0)
+        self.assertEqual(self.db.reserved_total("NEBIUS"),0)
+
+    def test_twitch_owner_is_not_bot_or_streamer(self):
+        http=DummyHTTP()
+        r=Router(self.env,self.db,http)
+        asyncio.run(r.complete("hello roborath",actor_login="joeyleq",
+                               actor_role="owner",max_tokens=55))
+        instr=http.requests[0]["messages"][0]["content"]
+        self.assertIn("speaker is Twitch account @joeyleq",instr)
+        self.assertIn("You are RoboRath",instr)
+        self.assertIn("Never address the speaker as RoboRath, Rath, or Rather",instr)
+        self.assertEqual(http.requests[0]["messages"][1]["content"],"hello roborath")
+
+    def test_source_evidence_is_passed_for_conversation(self):
+        http=DummyHTTP()
+        r=Router(self.env,self.db,http)
+        asyncio.run(r.complete("weather now",sources="Open-Meteo: 5 C.",
+                               actor_login="joeyleq"))
+        self.assertIn("Open-Meteo: 5 C",http.requests[0]["messages"][1]["content"])
 
     def test_https_only(self):
         self.env["NVIDIA_BASE_URL"]="http://localhost:9999/v1"
