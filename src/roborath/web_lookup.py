@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import re
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 import httpx
 
@@ -39,6 +40,38 @@ def needs_lookup(question: str) -> bool:
     return bool(LIVE_HINT.search(question))
 
 
+def _bing_rss(query: str) -> list[dict[str, str]]:
+    """Read Bing's public RSS search feed if metasearch engines fail.
+
+    Require multiple query terms in titles so dictionary results for 'won'
+    cannot masquerade as an answer to a Formula 1 winners query.
+    """
+    response = httpx.get(
+        "https://www.bing.com/search",
+        params={"q":query[:250],"format":"rss","mkt":"en-US","setlang":"en-US"},
+        headers={"User-Agent":"Mozilla/5.0"},
+        timeout=8,follow_redirects=False)
+    response.raise_for_status()
+    if len(response.content)>300_000:
+        return []
+    root = ElementTree.fromstring(response.content)
+    stop = {"what","when","where","which","about","latest","current","today",
+            "right","from","with","have","that","search","whose","winner",
+            "won","some","time","this","year","what's"}
+    relevant = set(re.findall(r"[a-z]{4,}",query.casefold())) - stop
+    results = []
+    for item in root.findall(".//item")[:8]:
+        title=(item.findtext("title") or "").strip()
+        url=(item.findtext("link") or "").strip()
+        words=set(re.findall(r"[a-z]{4,}",title.casefold()))
+        if len(words & relevant) < min(2,len(relevant)):
+            continue
+        results.append({"title":title,"href":url})
+        if len(results)>=3:
+            break
+    return results
+
+
 def _search_sync(query: str) -> tuple[str, str]:
     # Short, bounded snippets only. Do not fetch or execute linked webpages.
     from ddgs import DDGS
@@ -53,6 +86,11 @@ def _search_sync(query: str) -> tuple[str, str]:
                 break
         except Exception:
             continue
+    if not items:
+        try:
+            items=_bing_rss(query)
+        except (httpx.HTTPError, ElementTree.ParseError, ValueError):
+            items=[]
     lines = []
     first_domain = ""
     for item in items[:2]:

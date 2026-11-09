@@ -30,6 +30,21 @@ class WebLookupTests(unittest.TestCase):
         self.assertTrue(needs_lookup("weather in Tajikistan right now"))
         self.assertTrue(needs_lookup("latest news in Japan"))
 
+    def test_bing_rss_filters_irrelevant_dictionary_results(self):
+        from unittest.mock import patch
+        from web_lookup import _bing_rss
+        xml = b"""<?xml version="1.0"?><rss><channel>
+        <item><title>WON Definition and Meaning</title><link>https://www.dictionary.com/won</link></item>
+        <item><title>F1 Brazilian Grand Prix Race Results 2026</title><link>https://www.formula1.com/results</link></item>
+        </channel></rss>"""
+        class Response:
+            content=xml
+            def raise_for_status(self):pass
+        with patch("web_lookup.httpx.get",return_value=Response()):
+            hits=_bing_rss("who won latest Formula 1 Brazilian Grand Prix race 2026")
+        self.assertEqual(len(hits),1)
+        self.assertIn("Brazilian Grand Prix",hits[0]["title"])
+
     def test_web_results_are_link_titles_not_model_inventions(self):
         from unittest.mock import patch
         from web_lookup import _search_sync
