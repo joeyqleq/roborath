@@ -107,3 +107,14 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
 - NVIDIA Nemotron 3 Ultra 550B appears in the available model catalog and
   NVIDIA advertises a trial endpoint, but ORA3 direct inference timed out;
   do not enable it for latency-sensitive Twitch until live inference passes.
+
+
+## Owner-only Twitch QA (2026-11-09)
+
+For this testing period, `ROBORATH_OWNER_ONLY_TEST_MODE=true` is deployed on
+ORA3. RoboRath responds to **Twitch user ID 1414798445 (joeyleq) only**,
+regardless of display-name casing. Every other sender, including the channel's
+streamer, is ignored before logging, AI inference, moderator commands,
+notifications, or quota checks. Scheduled reminders are paused entirely.
+Disable this flag only after the owner explicitly authorizes public testing.
+The separate private Mattermost relay remains fail-closed until verified.

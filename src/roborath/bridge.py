@@ -250,6 +250,13 @@ class Bridge:
         speaker=event.get("chatter_user_id","")
         if not speaker:
             return
+        # Temporary private Twitch QA mode. Match immutable OAuth-authenticated
+        # Twitch user ID, never a display name or nickname supplied in text.
+        if os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true":
+            owner=os.getenv("ROBORATH_OWNER_TWITCH_USER_ID","")
+            if not owner or speaker!=owner:
+                return
+
         lock=self._speaker_locks.setdefault(speaker,asyncio.Lock())
         async with lock:
             return await self._on_chat_serialized(event)

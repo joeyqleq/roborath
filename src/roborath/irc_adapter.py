@@ -30,6 +30,8 @@ CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "").strip()
 TOKEN_FILE = os.getenv("TWITCH_TOKEN_FILE", "").strip()
 MIN_REPLY_INTERVAL = max(2, int(os.getenv("GT_GLOBAL_REPLY_COOLDOWN_SECONDS", "12")))
 THREADED_REPLIES = os.getenv("ROBORATH_THREADED_REPLIES", "false").lower() == "true"
+OWNER_ONLY_TEST = os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE", "false").lower() == "true"
+OWNER_ID = os.getenv("ROBORATH_OWNER_TWITCH_USER_ID", "")
 
 
 def parse_tags(source):
@@ -197,6 +199,11 @@ class IRCAdapter:
     async def reminder_loop(self):
         """Post due reminders while connected, with the same paced IRC queue."""
         while self.ws:
+            if OWNER_ONLY_TEST:
+                # Suspend all scheduled posts during owner-only QA, including
+                # previously queued reminders to other Twitch users.
+                await asyncio.sleep(10)
+                continue
             try:
                 due = self.bridge.notifications.due(limit=4)
                 for reminder_id, user_id, note in due:
@@ -266,6 +273,9 @@ class IRCAdapter:
                     continue
                 incoming_channel, payload = event
                 if incoming_channel != CHANNEL or payload["chatter_user_login"] == NICK:
+                    continue
+                if OWNER_ONLY_TEST and (not OWNER_ID or
+                                        payload.get("chatter_user_id") != OWNER_ID):
                     continue
                 if payload["room_id"]:
                     self.room_id = payload["room_id"]

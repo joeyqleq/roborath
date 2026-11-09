@@ -52,6 +52,7 @@ def main():
        "ROBORATH_ROUTER_LEDGER":"/var/lib/roborath/spend.sqlite3",
        "NVIDIA_VERIFIED":"false",
        "ROBORATH_LOCAL_DECISION_ENABLED":"true",
+       "ROBORATH_OWNER_ONLY_TEST_MODE":"true",
        "GT_USER_COOLDOWN_SECONDS":"8",
        "GT_GLOBAL_REPLY_COOLDOWN_SECONDS":"4",
        "GT_LOG_RETENTION_DAYS":"30",
