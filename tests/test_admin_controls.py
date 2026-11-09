@@ -31,6 +31,7 @@ class AdminIntegrationTests(unittest.TestCase):
         os.environ["ROBORATH_FACT_RELAY_ENABLED"]="false"
         bridge.last_user_call.clear()
         bridge.last_cooldown_notice.clear()
+        bridge.last_quota_notice.clear()
         self.bot=Bridge()
         self.bot.router=object()
         self.sent=[]
@@ -133,6 +134,35 @@ class AdminIntegrationTests(unittest.TestCase):
         self.assertEqual(self.bot.db.execute(
             "SELECT count(*) FROM rr_consumptions WHERE message_id='failingfact'").fetchone()[0],0)
         self.assertTrue(any("allowance was refunded" in x[1] for x in self.sent))
+
+    def test_fact_quota_not_silent_and_no_duplicate_model_calls(self):
+        call_count=[0]
+        async def post(prompt):
+            call_count[0]+=1
+            return "thread-id"
+        async def answer(root):
+            return "Correct. Source: https://science.nasa.gov"
+        async def shortener(text,http,limit=2):
+            return text
+        self.bot.mm_post=post;self.bot.mm_answer=answer
+        self.send(OWNER,"joeyleq","allow @viewerx to fact check","quota-grant")
+        os.environ["ROBORATH_FACT_RELAY_ENABLED"]="true"
+        with patch.object(bridge,"MM_TOKEN","test-token"),patch.object(
+            bridge,"MM_CHANNEL","private-test"),patch.object(
+            bridge,"shorten_sources",shortener):
+            self.send(VIEWER,"viewerx","!fact Is the Sun a star?","firstfact")
+            bridge.last_user_call.pop(VIEWER,None)
+            self.send(VIEWER,"viewerx","!fact Is the Moon a star?","secondfact")
+        self.assertEqual(call_count[0],1)
+        self.assertEqual(self.bot.db.execute("SELECT status FROM chat_events WHERE message_id='secondfact'").fetchone()[0],"quota_denied")
+        self.assertTrue(any(mid=="secondfact" and "limit reached" in msg for mid,msg in self.sent))
+        self.assertEqual(self.bot.db.execute("SELECT count(*) FROM rr_consumptions WHERE twitch_user_id=?",(VIEWER,)).fetchone()[0],1)
+
+    def test_missing_question_gets_usage_not_silence(self):
+        self.send(OWNER,"joeyleq","!ask","usage-owner")
+        self.assertTrue(any(mid=="usage-owner" and "Usage" in msg for mid,msg in self.sent))
+        self.send(OWNER,"joeyleq","!fact","usage-owner-fact")
+        self.assertTrue(any(mid=="usage-owner-fact" and "Usage" in msg for mid,msg in self.sent))
 
     def test_owner_access_status(self):
         self.send(OWNER,"joeyleq","allow @viewerx to use research","grant")

@@ -161,3 +161,12 @@ agent's Hermes route was privately verified with short NASA/ESA-backed
 fact/research responses before enabling the bridge. Its backend provider
 may become unavailable or rate-limited later; errors fail closed and
 refund specialist quotas. Twitch remains owner-plus-explicitly-granted only.
+
+
+### Testing usability and quota notices
+
+Authorized users receive a brief usage hint for incomplete `!ask`,
+`!search`, `!fact`, or `!research` commands. After hitting their
+FactCheck/Research quota, they get a concise limit notice (at most once
+per user/capability per 30 seconds), rather than unexplained silence.
+These notices never override global mute or a revoked user permission.

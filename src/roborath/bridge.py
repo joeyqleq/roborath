@@ -37,6 +37,7 @@ RETENTION_DAYS = int(os.getenv("GT_LOG_RETENTION_DAYS", "30"))
 WS_URL = "wss://eventsub.wss.twitch.tv/ws"
 last_user_call = {}
 last_cooldown_notice = {}
+last_quota_notice = {}
 gate = asyncio.Semaphore(2)
 
 def init_db():
@@ -435,6 +436,17 @@ class Bridge:
                 remaining=max(1,int(USER_WAIT-(now-last_user_call[user])+0.99))
                 await self.twitch_reply(f"cooldown: try again in {remaining}s",mid)
             return
+        incomplete=re.fullmatch(r"!(ask|search|fact|check|research)\s*",cmd,re.I)
+        if incomplete:
+            name=incomplete[1].lower()
+            sample="!ask <question>" if name=="ask" else (
+                "!search <topic>" if name=="search" else
+                "!research <topic>" if name=="research" else "!fact <claim>")
+            await self.twitch_reply("Usage: "+sample,mid)
+            self.db.execute("UPDATE chat_events SET command=?,status='usage_error' WHERE message_id=?",
+                            (name,mid))
+            self.db.commit()
+            return
         chat_match=re.fullmatch(
             r"(?:!ask|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+(.{2,700})",cmd,re.I)
         search_match=re.fullmatch(r"!search\s+(.{2,700})",cmd,re.I)
@@ -551,7 +563,17 @@ class Bridge:
         # Explicit fail-closed until immutable Twitch owner/streamer IDs resolve.
         if self.policy is None:return
         decision=self.policy.check_or_reserve(user,mid,capability,stream)
-        if not decision.allowed:return
+        if not decision.allowed:
+            state="quota_denied" if "limit reached" in decision.reason else "denied"
+            self.db.execute("UPDATE chat_events SET command=?,status=? WHERE message_id=?",
+                            (capability,state,mid))
+            self.db.commit()
+            if state=="quota_denied" and now-last_quota_notice.get((user,capability),-1e9)>30:
+                last_quota_notice[(user,capability)]=now
+                reason=("fact limit reached for this stream" if capability=="fact" else
+                        "research limit reached for today")
+                await self.twitch_reply(reason+"; ask the owner for additional calls.",mid)
+            return
         last_user_call[user]=now
         async with gate:
             request=clean_request(question)

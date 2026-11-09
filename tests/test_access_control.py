@@ -33,6 +33,9 @@ class GrammarTests(unittest.TestCase):
             "stop talking":("mute","",""),
             "RoboRath, don't reply to anyone":("mute","",""),
             "stop talking, don't reply to anyone":("mute","",""),
+            "Stop talking until I say so":("mute","",""),
+            "Don't reply to anyone until I tell you to resume":("mute","",""),
+            "start talking again":("resume","",""),
             "RoboRath resume talking":("resume","",""),
             "you can reply again":("resume","",""),
             "show access":("show","",""),
@@ -57,6 +60,8 @@ class GrammarTests(unittest.TestCase):
             ("!research why","research"),("!rr help","help")):
             self.assertEqual(requested_capability(text),cap)
         self.assertIsNone(requested_capability("grant @viewerx conversation"))
+        self.assertEqual(requested_capability("!ask"),"conversation")
+        self.assertEqual(requested_capability("!research"),"research")
 
 
 class StoreTests(unittest.TestCase):

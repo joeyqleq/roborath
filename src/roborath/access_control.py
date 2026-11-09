@@ -57,8 +57,15 @@ def parse_admin(raw: str) -> AdminIntent | None:
     text=raw.strip().replace("’","'").replace("‘","'").replace("“",'"').replace("”",'"')
     text=PREFIX.sub("",text,count=1).strip().casefold().rstrip(".!,")
     text=re.sub(r"[,;:]+\s*", " ",text).strip()
-    if text in MUTE:return AdminIntent("mute")
-    if text in RESUME:return AdminIntent("resume")
+    if text in MUTE or re.fullmatch(
+        r"(?:stop talking(?:\s+don't reply to anyone)?|don't reply to anyone|"
+        r"do not reply to anyone|dont reply to anyone)"
+        r"(?:\s+(?:until (?:i (?:say so|tell you(?: to resume| to start| otherwise)?)"
+        r"|further notice)|for now))?",text):
+        return AdminIntent("mute")
+    if text in RESUME or text in ("start talking again","start responding again",
+                                  "resume responding","you can reply now"):
+        return AdminIntent("resume")
     if text in SHOW:return AdminIntent("show")
     for pattern in (ACCESS,GRANT,REVOKE):
         match=pattern.fullmatch(text)
@@ -82,6 +89,9 @@ def requested_capability(raw: str) -> str | None:
     if re.match(r'^(?:!research|!rr\s+research|@roborath\s+research|(?:hey\s+)?roborath\s*[:,!]\s*research)(?=\s|$)',text):
         return "research"
     if re.fullmatch(r'!rr\s+help(?:\s+[12])?',text):return "help"
+    if re.fullmatch(r'!(?:ask|search)\s*',text):return "conversation"
+    if re.fullmatch(r'!(?:fact|check)\s*',text):return "fact"
+    if re.fullmatch(r'!research\s*',text):return "research"
     return None
 
 class TestAccess:
