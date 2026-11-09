@@ -29,10 +29,11 @@ MM_TOKEN = os.getenv("MATTERMOST_BOT_TOKEN", "")
 MM_CHANNEL = os.getenv("MATTERMOST_CHANNEL_ID", "")
 MM_FACTCHECK_USER = os.getenv("MM_FACTCHECK_USER_ID", "d66mch8hwtrfzdj795wgctzxra")
 COMMANDS = {"!fact": "@greenthumb-ai", "!check": "@greenthumb-ai", "!ai": "@greenthumb-ai"}
-USER_WAIT = int(os.getenv("GT_USER_COOLDOWN_SECONDS", "40"))
+USER_WAIT = max(3, int(os.getenv("GT_USER_COOLDOWN_SECONDS", "8")))
 RETENTION_DAYS = int(os.getenv("GT_LOG_RETENTION_DAYS", "30"))
 WS_URL = "wss://eventsub.wss.twitch.tv/ws"
 last_user_call = {}
+last_cooldown_notice = {}
 gate = asyncio.Semaphore(2)
 
 def init_db():
@@ -57,6 +58,19 @@ def is_trigger(text):
 
 def clean_request(text):
     return text.replace("@", "@\u200b").replace("\x00", " ").strip()[:700]
+
+
+def exact_answer(question):
+    """Handle deterministic, small tasks without unreliable LLM counting."""
+    m=re.search(r"how many\s+(?:letters?\s+)?([a-z])(?:['’]s|s)?\s+(?:(?:are\s+)?(?:there|their)\s+)?in\s+([a-z]+)",
+                question.casefold())
+    if m:
+        letter,word=m.groups()
+        return f"{word} has {word.count(letter)} occurrences of '{letter}'."
+    if re.search(r"prove\s+2\s*\+\s*1\s+is\s+not\s+3",question,re.I):
+        return "You can't prove that: 2 + 1 = 3."
+    return None
+
 
 class Bridge:
     def __init__(self):
@@ -177,16 +191,21 @@ class Bridge:
             return self.mario.vote(stream,actor_id," ".join(parts[2:]))
         if len(parts)>=2 and parts[:2]==["?!"]:
             return self.mario.vote(stream,actor_id," ".join(parts[1:]))
-        if len(parts)>=3 and parts[:2]==["!rr","mario"]:
-            action=parts[2]
+        if len(parts)>=2 and parts[:2]==["!rr","mario"]:
+            action=parts[2] if len(parts)>=3 else "status"
+            if action=="status" and len(parts)==3 or len(parts)==2:
+                enabled,round_no,count=self.mario.status(stream)
+                return f"mario: {enabled}, round {round_no}, roster {count}. auto-off after 5h. !rr mario on|off|reset."
             if action in ("scores","leaderboard"):
                 scores=self.mario.scores(stream if action=="scores" else None)
                 return "mario wins: "+(", ".join(name+" "+str(points) for name,points in scores[:10]) if scores else "no confirmed wins yet")
             if not self.policy or not self.policy.can_manage(actor_id,"mario_manage"):
                 return None
+            if action=="reset" and len(parts)==3:
+                return self.mario.reset(stream)
             if action in ("on","off") and len(parts)==3:
                 self.mario.enable(stream,action=="on")
-                return "mario kart mode "+("on! who's playing? operator: !rr mario roster <players>" if action=="on" else "off")
+                return "mario mode "+("on for 5h; !rr mario roster <players> to track scores" if action=="on" else "off; !rr mario reset to clear this session")
             if action=="roster" and len(parts)>=5:
                 try:
                     self.mario.roster(stream,parts[3:])
@@ -246,7 +265,6 @@ class Bridge:
         except sqlite3.Error as err:
             LOG.warning("chat log write failed %s",type(err).__name__)
         now=time.monotonic()
-        if user in last_user_call and now-last_user_call[user]<USER_WAIT:return
         cmd=raw.strip()
         if re.fullmatch(r"!rr\s+help(?:\s+[12])?",cmd,re.I):
             last_user_call[user]=now
@@ -299,14 +317,37 @@ class Bridge:
                 last_user_call[user]=now
                 await self.twitch_reply(result,mid)
                 return
+        if cmd.lower()=="!rr doctor" and self.policy and user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID"):
+            state,round_no,_=self.mario.status(stream)
+            provider=bool(self.router)
+            relay=bool(MM_TOKEN and MM_CHANNEL and os.getenv("ROBORATH_FACT_RELAY_ENABLED","false").lower()=="true")
+            await self.twitch_reply(f"roborath online; model {'ready' if provider else 'missing'}; mario {state} round {round_no}; fact relay {'ready' if relay else 'offline'}",mid)
+            return
+        # Operator controls are ALWAYS processed above this viewer throttle.
+        is_operator=user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") or user==os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID")
+        if not is_operator and now-last_user_call.get(user,-1e9)<USER_WAIT:
+            self.db.execute("UPDATE chat_events SET status='rate_limited' WHERE message_id=?",(mid,))
+            self.db.commit()
+            if (cmd.lower().startswith(("!ask ","!search ","!fact ","!research ")) and
+                    now-last_cooldown_notice.get(user,-1e9)>25):
+                last_cooldown_notice[user]=now
+                remaining=max(1,int(USER_WAIT-(now-last_user_call[user])+0.99))
+                await self.twitch_reply(f"cooldown: try again in {remaining}s",mid)
+            return
         chat_match=re.fullmatch(
             r"(?:!ask|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+(.{2,700})",cmd,re.I)
         search_match=re.fullmatch(r"!search\s+(.{2,700})",cmd,re.I)
         if chat_match or search_match:
-            if self.router is None:return
+            if self.router is None:
+                await self.twitch_reply("model router unavailable; try again shortly",mid)
+                self.db.execute("UPDATE chat_events SET status='failed' WHERE message_id=?",(mid,))
+                self.db.commit()
+                return
             last_user_call[user]=now
             async with gate:
                 try:
+                    self.db.execute("UPDATE chat_events SET status='pending' WHERE message_id=?",(mid,))
+                    self.db.commit()
                     question=clean_request((search_match or chat_match).group(1))
                     web_enabled=os.getenv("ROBORATH_WEB_SEARCH_ENABLED","true").lower()=="true"
                     if "web search" in question.casefold() and any(
@@ -323,9 +364,12 @@ class Bridge:
                     wants_search=bool(search_match or needs_lookup(question))
                     if web_enabled and wants_search:
                         sources,source_domain=await lookup(question,self.http,forced=bool(search_match))
-                    if wants_search and not sources and (search_match or "weather" in question.casefold() or
+                    fixed=exact_answer(question)
+                    if fixed is not None:
+                        reply=fixed
+                    elif wants_search and not sources and (search_match or "weather" in question.casefold() or
                             "right now" in question.casefold() or "latest" in question.casefold()):
-                        reply="live web lookup is unavailable right now. i won't make up current results."
+                        reply="live web lookup unavailable; won't invent current facts."
                     elif source_domain=="open-meteo.com" and sources:
                         reply=sources  # Deterministic live weather; never ask model to reinterpret WMO codes.
                     elif sources:
@@ -340,7 +384,7 @@ class Bridge:
                         role=("owner" if user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") else
                               "streamer" if user==os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID") else "viewer")
                         response=await self.router.complete(
-                           question,tier="mario" if self.mario.active(stream) else "chat",
+                           question,tier="chat",
                            sources=sources,actor_id=user,actor_login=login,actor_role=role,
                            max_tokens=130,quality=quality)
                         reply=sentence_clip(without_raw_links(response.text),budget=370)
@@ -354,6 +398,12 @@ class Bridge:
                     self.db.commit()
                 except Exception as err:
                     LOG.warning("conversational model error %s",type(err).__name__)
+                    self.db.execute("UPDATE chat_events SET command='chat',status='failed' WHERE message_id=?",(mid,))
+                    self.db.commit()
+                    try:
+                        await self.twitch_reply("answer failed this time; try again.",mid)
+                    except Exception as send_err:
+                        LOG.warning("failure reply unavailable (%s)",type(send_err).__name__)
             return
         parsed=parse_public(raw)
         if not parsed:return

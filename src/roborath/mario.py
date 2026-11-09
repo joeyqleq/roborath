@@ -6,7 +6,7 @@ No inference is made from ordinary, unrelated chat messages.
 import re
 import sqlite3
 from difflib import get_close_matches
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 def alias(s):
     return re.sub(r"[^a-z0-9_]", "", str(s).lower())
@@ -28,17 +28,50 @@ class Mario:
           stream_id TEXT NOT NULL, round_no INTEGER NOT NULL,
           player TEXT NOT NULL, confirmed_utc TEXT NOT NULL,
           PRIMARY KEY(stream_id,round_no))""")
+        # Compatible migration for sessions created before the expiration feature.
+        cols={row[1] for row in self.db.execute("PRAGMA table_info(mario_sessions)")}
+        if "enabled_utc" not in cols:
+            self.db.execute("ALTER TABLE mario_sessions ADD COLUMN enabled_utc TEXT")
         self.db.commit()
 
+    MAX_HOURS = 5
+
     def active(self, stream):
-        x=self.db.execute("SELECT enabled FROM mario_sessions WHERE stream_id=?",(stream,)).fetchone()
-        return bool(x and x[0])
+        row=self.db.execute("SELECT enabled,enabled_utc FROM mario_sessions WHERE stream_id=?",
+                            (stream,)).fetchone()
+        if not row or not row[0]:
+            return False
+        try:
+            started=datetime.fromisoformat(row[1])
+            if started.tzinfo is None:
+                started=started.replace(tzinfo=timezone.utc)
+            valid=datetime.now(timezone.utc)-started < timedelta(hours=self.MAX_HOURS)
+        except (TypeError, ValueError):
+            valid=False
+        if not valid:
+            self.enable(stream,False)
+        return valid
 
     def enable(self, stream, enabled=True):
+        timestamp=datetime.now(timezone.utc).isoformat() if enabled else None
         with self.db:
-            self.db.execute("""INSERT INTO mario_sessions(stream_id,enabled)
-               VALUES(?,?) ON CONFLICT(stream_id) DO UPDATE SET enabled=excluded.enabled""",
-               (stream,int(enabled)))
+            self.db.execute("""INSERT INTO mario_sessions(stream_id,enabled,enabled_utc)
+               VALUES(?,?,?) ON CONFLICT(stream_id) DO UPDATE SET enabled=excluded.enabled,
+               enabled_utc=excluded.enabled_utc""", (stream,int(enabled),timestamp))
+
+    def reset(self,stream):
+        """Clear this stream's mode, roster, votes, winners, and round counter."""
+        with self.db:
+            for table in ("mario_votes","mario_winners","mario_players"):
+                self.db.execute("DELETE FROM "+table+" WHERE stream_id=?",(stream,))
+            self.db.execute("""INSERT INTO mario_sessions(stream_id,enabled,current_round,enabled_utc)
+                VALUES(?,0,1,NULL)
+                ON CONFLICT(stream_id) DO UPDATE SET enabled=0,current_round=1,enabled_utc=NULL""",
+                (stream,))
+        return "mario kart reset: mode off, round 1, roster and scores cleared"
+
+    def status(self,stream):
+        return ("on" if self.active(stream) else "off"),self.current_round(stream) or 1,len(self.players(stream))
 
     def roster(self, stream, names):
         cleaned=[alias(n) for n in names]

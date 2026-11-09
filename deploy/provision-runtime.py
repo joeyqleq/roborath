@@ -52,8 +52,8 @@ def main():
        "ROBORATH_ROUTER_LEDGER":"/var/lib/roborath/spend.sqlite3",
        "NVIDIA_VERIFIED":"false",
        "ROBORATH_LOCAL_DECISION_ENABLED":"true",
-       "GT_USER_COOLDOWN_SECONDS":"40",
-       "GT_GLOBAL_REPLY_COOLDOWN_SECONDS":"12",
+       "GT_USER_COOLDOWN_SECONDS":"8",
+       "GT_GLOBAL_REPLY_COOLDOWN_SECONDS":"4",
        "GT_LOG_RETENTION_DAYS":"30",
     })
     if not all(environment.get(k,"").isdecimal() for k in ("ROBORATH_OWNER_TWITCH_USER_ID",

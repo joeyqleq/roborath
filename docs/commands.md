@@ -57,3 +57,24 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
 - Search is best-effort and may be rate limited. `ROBORATH_WEB_SEARCH_ENABLED=false`
   disables external web lookup. The separate `!fact`/`!research` specialist
   remains fail-closed until its restricted Mattermost relay is tested.
+
+
+## Mario session controls and conversation reliability (2026-11-09)
+
+- `!rr mario status`: show on/off, current round, roster size.
+- `!rr mario on` / `!rr mario off`: owner/supervisor controls that
+  bypass the public chat cooldown.
+- `!rr mario reset`: owner/supervisor only; clear this stream's active mode,
+  roster, votes, winners and round number, return to round 1.
+- Mario mode automatically turns OFF after 5 hours from activation. A new
+  stream ID starts a separate session. Mario mode does not hijack general
+  `!ask` questions or replace their conversational AI instructions.
+- `!rr doctor`: owner-only concise status for model, Mario and relay.
+- Operator requests have no per-viewer cooldown. Normal viewers have an
+  8-second cooldown with one explicit notice, rather than silent nonanswers.
+  Global reply pacing is 4 seconds.
+- Public replies contain exactly one addressed Twitch `@username`, not two.
+  No generated hashtags or emoji clutter. English is the default unless
+  explicitly requested otherwise.
+- Model backend: Nebius Qwen3-30B first, Qwen3-235B for stronger questions,
+  Merge Nova-2-Lite fallback. Actual provider permissions and balance apply.

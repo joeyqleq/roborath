@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 
 import httpx
 from websockets.asyncio.client import connect
@@ -67,6 +68,24 @@ def parse_privmsg(line):
         "message": {"text": body},
         "room_id": tags.get("room-id", ""),
     }
+
+
+def sanitize_public_reply(answer: str, login: str = "") -> str:
+    """Strip model hype, duplicate speaker mentions, and decorative clutter."""
+    answer=re.sub(r"\s+", " ", str(answer or "")).strip()
+    # Twitch's IRC chat is a public one-line plain-text surface.
+    answer=re.sub(r"(?<!\S)#[A-Za-z][A-Za-z0-9_]*\b", "", answer)
+    answer=re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", "", answer)
+    answer="".join(ch for ch in answer if unicodedata.category(ch) not in ("Cc","Cf") or ch==" ")
+    if re.fullmatch(r"[a-z0-9_]{3,25}",login or "",re.I):
+        identity=re.escape(login)
+        # Avoid '@joeyleq Hey @joeyleq', even when the model puts the
+        # second mention after a greeting instead of at the start.
+        answer=re.sub(r"(?i)(?<!\w)@"+identity+r"\b", "", answer)
+        answer=re.sub(r"(?i)^(?:hey|hi|hello|yo)\b[!, ]*\s*(?:—|[-,:])?\s*(?=\w)", "", answer)
+    answer=re.sub(r"(?i)\s*(?:[.!?]\s*)?(?:what(?:'s| is) on your mind|how can i help(?: you)?|ask away)[?!\s]*$", "", answer)
+    answer=re.sub(r"\s+", " ", answer).strip(" ,:;—-")
+    return answer
 
 
 class IRCAdapter:
@@ -145,14 +164,15 @@ class IRCAdapter:
             raise ConnectionError("IRC socket not connected")
         # Plain channel replies avoid Twitch's visually confusing mini-thread.
         # Prefix the verified sender's login instead of making the model guess.
-        answer = re.sub(r"\s+", " ", answer).strip()
-        if not THREADED_REPLIES and message_id:
+        login=""
+        if message_id:
             row = self.bridge.db.execute(
                 "SELECT twitch_login FROM chat_events WHERE message_id=?",
                 (message_id,)).fetchone()
             login = row[0] if row else ""
-            if re.fullmatch(r"[a-z0-9_]{3,25}", login or "", re.I) and not answer.lower().startswith("@"+login.lower()):
-                answer = "@"+login+" "+answer
+        answer=sanitize_public_reply(answer,login)
+        if not THREADED_REPLIES and re.fullmatch(r"[a-z0-9_]{3,25}",login or "",re.I):
+            answer="@"+login+" "+answer
         encoded = answer.encode("utf-8")[:430]
         answer = encoded.decode("utf-8", errors="ignore")
         if not answer:

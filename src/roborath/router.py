@@ -37,7 +37,7 @@ WINDOW = {"NEBIUS": "lifetime", "MERGE": "month", "NVIDIA": "month"}
 ROUTES = {
     "chat": [
         ("NEBIUS", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-        ("MERGE", "amazon/nova-micro"),
+        ("MERGE", "amazon/nova-2-lite"),
         ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
     ],
     "mario": [
@@ -212,7 +212,7 @@ class Router:
             try:
                 body={"model":model,"messages":[{"role":"system","content":instruction},
                       {"role":"user","content":("Evidence:\n"+sources[:12000]+"\n\nQuestion:\n" if sources else "")+prompt}],
-                      "temperature":.3 if tier=="research" else .65,
+                      "temperature":.25 if tier=="research" else .35,
                       "max_tokens":max_tokens,"stream":False}
                 resp=await self.http.post(base+"/chat/completions",
                   headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
