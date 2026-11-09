@@ -118,3 +118,46 @@ streamer, is ignored before logging, AI inference, moderator commands,
 notifications, or quota checks. Scheduled reminders are paused entirely.
 Disable this flag only after the owner explicitly authorizes public testing.
 The separate private Mattermost relay remains fail-closed until verified.
+
+
+## Private QA access controls and global silence (2026-11-10)
+
+Only verified Twitch **user ID 1414798445** may administer QA permissions.
+Twitch display names, tags and natural-language claims of being the owner
+are never authorization evidence. Target account nicknames are resolved through
+authenticated Twitch Helix `/users?login=...` to numeric user IDs before grants.
+
+Examples sent as normal chat by the owner (no `!rr` prefix needed):
+
+- `RoboRath, allow @viewerx to fact check`
+- `Give this user "viewerx" conversational abilities`
+- `Give @viewerx all AI abilities`
+- `Grant @viewerx research`
+- `Revoke @viewerx fact checking abilities`
+- `Remove @viewerx from testing`
+- `Show access`
+- `Stop talking` or `Don't reply to anyone`
+- `RoboRath, resume talking`
+
+Exact `!rr access grant viewerx fact|conversation|research|all` and
+`!rr access revoke viewerx ...` aliases are available too.
+
+A grant controls **eligibility**, not usage quotas. Fact-checking remains
+limited to 1 per viewer per stream and research 1 per viewer per UTC day,
+unless the owner separately allocates extra calls; owner is unlimited.
+All AI means conversation/search, fact-checking and research. It does *not*
+grant operator/supervisor, Mario administration or other server privileges.
+
+Global silence has no acknowledgment (by design). Owner resume restores
+outbound messages, but does not alter the access list. Pending model replies
+are checked again immediately before Twitch send, so muting/revoking a
+permission suppresses replies that finish later. During QA scheduled
+reminders are paused. Both grants and silence state survive process restarts
+in the private SQLite database. No tool/LLM may add users by itself.
+
+The restricted `roborath-relay` Mattermost bot, whose token is stored in
+`/etc/roborath.env` mode 0600, uses the separate FactCheck agent. The
+agent's Hermes route was privately verified with short NASA/ESA-backed
+fact/research responses before enabling the bridge. Its backend provider
+may become unavailable or rate-limited later; errors fail closed and
+refund specialist quotas. Twitch remains owner-plus-explicitly-granted only.

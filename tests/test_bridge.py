@@ -7,6 +7,8 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="12345"
     os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="99999"
     import bridge
+    old_db_path=bridge.DB_PATH
+    bridge.DB_PATH=os.environ["GT_TWITCH_DB"]
     from bridge import Bridge
     # Mock the fully configured relay for its integration test. Runtime
     # configuration without a real relay must fail closed separately.
@@ -53,5 +55,8 @@ with tempfile.TemporaryDirectory() as tmp:
         assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==2
         assert len(outgoing)==3
         await bot.http.aclose();bot.db.close()
-    asyncio.run(test())
+    try:
+        asyncio.run(test())
+    finally:
+        bridge.DB_PATH=old_db_path
 print("PASS: stream logging, agent routing, status and privacy deletion")

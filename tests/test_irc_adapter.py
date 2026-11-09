@@ -8,6 +8,12 @@ os.environ["TWITCH_IRC_NICK"] = "greenbot"
 os.environ["TWITCH_CHANNEL_LOGIN"] = "examplechannel"
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GT_TWITCH_DB"] = str(Path(tmp) / "twitch.sqlite3")
+    import bridge as bridge_module
+    old_db_path=bridge_module.DB_PATH
+    bridge_module.DB_PATH=os.environ["GT_TWITCH_DB"]
+    import irc_adapter as ia
+    old_nick,old_channel,old_test=ia.NICK,ia.CHANNEL,ia.OWNER_ONLY_TEST
+    ia.NICK,ia.CHANNEL,ia.OWNER_ONLY_TEST="greenbot","examplechannel",False
     from irc_adapter import IRCAdapter, parse_tags, parse_privmsg, sanitize_public_reply
     text=sanitize_public_reply("Hey @viewer! @viewer ready for Mario? #MK8DX 🏁 🎮", "viewer")
     assert "@viewer" not in text
@@ -53,5 +59,9 @@ with tempfile.TemporaryDirectory() as tmp:
         assert (await bridge.stream_id()).startswith("examplechannel-irc-day-")
         await bridge.bridge.http.aclose()
         bridge.bridge.db.close()
-    asyncio.run(test())
+    try:
+        asyncio.run(test())
+    finally:
+        bridge_module.DB_PATH=old_db_path
+        ia.NICK,ia.CHANNEL,ia.OWNER_ONLY_TEST=old_nick,old_channel,old_test
 print("PASS: IRC tags, message parsing, chat replies, stream fallback")

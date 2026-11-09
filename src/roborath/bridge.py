@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import httpx
 from policy import PolicyStore, parse_public
+from access_control import TestAccess,parse_admin,requested_capability
 from formatting import messages
 from shortlinks import shorten_sources
 from mario import Mario
@@ -82,9 +83,12 @@ class Bridge:
         # Serialize each speaker's turns; otherwise two rapid messages can
         # read the same stale context and reply out of order.
         self._speaker_locks:dict[str,asyncio.Lock]={}
+        self._owner_admin_replies=set()
+        self.lookup_twitch_login=None
         owner_id = os.getenv("ROBORATH_OWNER_TWITCH_USER_ID", "")
         streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
+        self.access=TestAccess(self.db,owner_id)
         self.mario = Mario(self.db)
         self.notifications = Notifications(self.db)
         self.router = None
@@ -182,6 +186,15 @@ class Bridge:
                 if p.get("user_id")!=MM_FACTCHECK_USER:continue
                 msg=(p.get("message") or "").strip()
                 if not msg:continue
+                # The Agents plugin sometimes returns a human-readable
+                # provider-quota error as an otherwise normal bot reply.
+                # Never send it as a fact-check or consume a user's quota.
+                if any(mark in msg.casefold() for mark in (
+                    "error occurred while accessing the llm",
+                    "rate limit exceeded",
+                    "free-models-per-day",
+                    "insufficient credits")):
+                    raise RuntimeError("Mattermost agent model unavailable")
                 if msg==previous:unchanged+=1
                 else:unchanged=0
                 previous=msg
@@ -246,19 +259,62 @@ class Bridge:
                 return self.mario.next_round(stream)
         return None
 
+    async def _owner_admin(self,event,intent):
+        actor=event["chatter_user_id"]
+        mid=event.get("message_id","")
+        if not self.access.is_owner(actor) or not mid:return
+        if intent.action in ("mute","resume"):
+            changed=self.access.set_mute(actor,mid,intent.action=="mute")
+            if changed and intent.action=="resume":
+                self._owner_admin_replies.add(mid)
+                await self.twitch_reply("RoboRath resumed. Your test access list is preserved.",mid)
+            # "Stop talking" produces no acknowledgement and immediately
+            # silences queued/in-flight responses at the transport boundary.
+            return
+        if self.access.muted():return  # no replies until explicit resume
+        message=""
+        if intent.action=="show":
+            message=self.access.summary()
+        elif intent.action in ("grant","revoke"):
+            if not self.lookup_twitch_login:
+                message="Can't verify Twitch usernames; access unchanged."
+            else:
+                try:
+                    target_id,canonical=await self.lookup_twitch_login(intent.login)
+                    changed=self.access.change(actor,mid,target_id,canonical,
+                                               intent.capability,intent.action=="grant")
+                    if changed:
+                        word="allowed" if intent.action=="grant" else "revoked"
+                        message=f"@{canonical}: {intent.capability} {word}. Owner-only administration stays on."
+                except (ValueError,PermissionError,LookupError,httpx.HTTPError,asyncio.TimeoutError) as exc:
+                    LOG.warning("owner access command failed (%s)",type(exc).__name__)
+                    message="Username verification failed; permissions unchanged."
+        if message:
+            self._owner_admin_replies.add(mid)
+            await self.twitch_reply(message,mid)
+
     async def on_chat(self, event):
         speaker=event.get("chatter_user_id","")
         if not speaker:
             return
-        # Temporary private Twitch QA mode. Match immutable OAuth-authenticated
-        # Twitch user ID, never a display name or nickname supplied in text.
-        if os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true":
-            owner=os.getenv("ROBORATH_OWNER_TWITCH_USER_ID","")
-            if not owner or speaker!=owner:
-                return
-
+        raw=event.get("message",{}).get("text","")
+        strict=os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true"
+        if strict and (not os.getenv("ROBORATH_OWNER_TWITCH_USER_ID","").isdigit() or
+                       self.access.owner_id!=os.getenv("ROBORATH_OWNER_TWITCH_USER_ID")):
+            return  # fail closed if configured owner identity disappears or changes
+        intent=parse_admin(raw)
+        if intent and self.access.is_owner(speaker):
+            # Control commands bypass the per-speaker LLM lock. Even if an AI
+            # reply is pending, owner silence is effective immediately.
+            return await self._owner_admin(event,intent)
+        if self.access.muted():
+            return  # don't consume any AI quota or work while silent
+        if not self.access.can_receive(speaker,raw,strict=strict):
+            return
         lock=self._speaker_locks.setdefault(speaker,asyncio.Lock())
         async with lock:
+            if not self.access.can_receive(speaker,raw,strict=strict):
+                return
             return await self._on_chat_serialized(event)
 
     async def _on_chat_serialized(self, event):
@@ -300,7 +356,7 @@ class Bridge:
             self.db.commit()
             if inserted.rowcount == 0:
                 return  # never answer duplicate message IDs on reconnect
-            alerts = self.notifications.scan(stream,raw)
+            alerts = [] if os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true" else self.notifications.scan(stream,raw)
             for _,recipient,notice in alerts:
                 row=self.db.execute("""SELECT twitch_login FROM chat_events
                     WHERE twitch_user_id=? ORDER BY created_utc DESC LIMIT 1""",
@@ -520,6 +576,13 @@ class Bridge:
                 self.policy.refund(mid)
                 answer=""
                 status="failed"
+                if not self.access.muted() and self.access.allowed(user,capability):
+                    try:
+                        await self.twitch_reply(
+                            "Specialist AI unavailable right now; your allowance was refunded.",mid)
+                    except Exception as send_error:
+                        LOG.warning("specialist error notification unavailable (%s)",
+                                    type(send_error).__name__)
             self.db.execute("UPDATE chat_events SET mattermost_post_id=?, answer_text=?, status=? WHERE message_id=?",
                 (post_id,answer,status,mid))
             self.db.commit()

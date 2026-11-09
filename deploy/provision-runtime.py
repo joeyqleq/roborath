@@ -53,6 +53,11 @@ def main():
        "NVIDIA_VERIFIED":"false",
        "ROBORATH_LOCAL_DECISION_ENABLED":"true",
        "ROBORATH_OWNER_ONLY_TEST_MODE":"true",
+       # Explicit owner opt-in in the protected master file; do not accidentally
+       # disable a verified live relay on subsequent re-provisioning.
+       "ROBORATH_FACT_RELAY_ENABLED": (
+           "true" if d.get("ROBORATH_FACT_RELAY_ENABLED","false").lower()=="true"
+           else "false"),
        "GT_USER_COOLDOWN_SECONDS":"8",
        "GT_GLOBAL_REPLY_COOLDOWN_SECONDS":"4",
        "GT_LOG_RETENTION_DAYS":"30",

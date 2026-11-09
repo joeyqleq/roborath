@@ -18,6 +18,7 @@ import unicodedata
 import httpx
 from websockets.asyncio.client import connect
 from bridge import Bridge, clean_request
+from access_control import requested_capability
 from twitch_auth import access_token
 
 LOG = logging.getLogger("gt-twitch-irc")
@@ -102,6 +103,7 @@ class IRCAdapter:
         self.token_checked_until = 0.0
         self.bridge.twitch_reply = self.reply
         self.bridge.stream_id = self.stream_id
+        self.bridge.lookup_twitch_login = self.lookup_login
 
     async def validate_token(self):
         if TOKEN_FILE:
@@ -161,9 +163,52 @@ class IRCAdapter:
         self.stream_cache = (identity, time.monotonic() + 60)
         return identity
 
+    async def lookup_login(self,login:str)->tuple[str,str]:
+        """Resolve public Twitch login via Helix, returning immutable user ID.
+
+        Reject unknown or mismatched names. Never use chat-supplied display
+        names or numeric user IDs as authorization evidence.
+        """
+        if not re.fullmatch(r"[a-z][a-z0-9_]{2,24}",login or ""):
+            raise ValueError("invalid Twitch login")
+        if not CLIENT_ID or not self.token:
+            raise PermissionError("no authenticated Twitch API session")
+        # A refreshed service OAuth token works for public /users lookup.
+        if TOKEN_FILE and time.monotonic()>=self.token_checked_until:
+            self.token,_=await access_token(CLIENT_ID,CLIENT_SECRET,TOKEN_FILE,
+                                            required_login=NICK)
+            self.token_checked_until=time.monotonic()+240
+        async with httpx.AsyncClient(timeout=9,follow_redirects=False) as http:
+            response=await http.get("https://api.twitch.tv/helix/users",
+                params={"login":login},headers={
+                    "Client-ID":CLIENT_ID,"Authorization":"Bearer "+self.token})
+            response.raise_for_status()
+        records=response.json().get("data",[])
+        matches=[x for x in records if x.get("login","").casefold()==login.casefold()
+                 and str(x.get("id","")).isdigit()]
+        if len(matches)!=1:raise LookupError("Twitch login not resolved uniquely")
+        return str(matches[0]["id"]),matches[0]["login"].lower()
+
     async def reply(self, answer, message_id):
         if not self.ws:
             raise ConnectionError("IRC socket not connected")
+        if self.bridge.access.muted():
+            raise PermissionError("global mute: no messages may be sent")
+        if OWNER_ONLY_TEST:
+            if not message_id:
+                raise PermissionError("scheduled or anonymous posts disabled in QA")
+            row=self.bridge.db.execute(
+                "SELECT twitch_user_id,request_text,command FROM chat_events WHERE message_id=?",
+                (message_id,)).fetchone()
+            if row:
+                user_id,request,command=row
+                caps={"chat":"conversation","search":"conversation",
+                      "fact":"fact","research":"research"}
+                capability=caps.get(command) or requested_capability(request)
+                if not capability or not self.bridge.access.allowed(user_id,capability):
+                    raise PermissionError("Twitch test permission revoked or absent")
+            elif message_id not in self.bridge._owner_admin_replies:
+                raise PermissionError("unlogged response not authorized in QA")
         # Plain channel replies avoid Twitch's visually confusing mini-thread.
         # Prefix the verified sender's login instead of making the model guess.
         login=""
@@ -183,6 +228,20 @@ class IRCAdapter:
             remaining = MIN_REPLY_INTERVAL - (time.monotonic() - self.last_send)
             if remaining > 0:
                 await asyncio.sleep(remaining)
+            # Check again after pacing: a mute/revoke may have arrived while a
+            # previous model call was generating or the IRC queue was waiting.
+            if self.bridge.access.muted():
+                raise PermissionError("global mute while reply pending")
+            if OWNER_ONLY_TEST and message_id not in self.bridge._owner_admin_replies:
+                row=self.bridge.db.execute(
+                    "SELECT twitch_user_id,request_text,command FROM chat_events WHERE message_id=?",
+                    (message_id,)).fetchone()
+                if not row:
+                    raise PermissionError("no verified message owner for reply")
+                capability={"chat":"conversation","search":"conversation",
+                            "fact":"fact","research":"research"}.get(row[2]) or requested_capability(row[1])
+                if not capability or not self.bridge.access.allowed(row[0],capability):
+                    raise PermissionError("access revoked during in-flight reply")
             reference = message_id if re.fullmatch(r"[A-Za-z0-9-]{1,90}", message_id) else ""
             tag = "@reply-parent-msg-id=" + reference + " " if reference and THREADED_REPLIES else ""
             await self.ws.send(tag + "PRIVMSG #" + CHANNEL + " :" + answer + "\r\n")
@@ -274,8 +333,10 @@ class IRCAdapter:
                 incoming_channel, payload = event
                 if incoming_channel != CHANNEL or payload["chatter_user_login"] == NICK:
                     continue
-                if OWNER_ONLY_TEST and (not OWNER_ID or
-                                        payload.get("chatter_user_id") != OWNER_ID):
+                if OWNER_ONLY_TEST and not self.bridge.access.can_receive(
+                        payload.get("chatter_user_id",""),
+                        payload.get("message",{}).get("text",""),
+                        strict=True):
                     continue
                 if payload["room_id"]:
                     self.room_id = payload["room_id"]
