@@ -78,3 +78,32 @@ For supervisor permissions, allowed capability strings are `fact_grant`, `resear
   explicitly requested otherwise.
 - Model backend: Nebius Qwen3-30B first, Qwen3-235B for stronger questions,
   Merge Nova-2-Lite fallback. Actual provider permissions and balance apply.
+
+
+## Short-term context and answer scenarios (2026-11-09)
+
+- Same Twitch viewer and same stream only: last six answered conversation/search
+  turns from the past 45 minutes are included as **untrusted dialogue history**.
+  Messages from another viewer or stream are never included. No claim of
+  permanent personal memory. Turns are serialized per viewer.
+- Operator can repeat a deterministic letter-count question unprefixed within
+  90 seconds of the preceding answered turn; other conversations still use
+  explicit !ask or !search commands so the bot doesn't reply to all chatter.
+- Deterministic counting supports curly apostrophes and variants such as
+  `how many r’s r there in strawberry?` and `sstrawberry`.
+- Self-correction: follow-up queries about recent contradictions can correct
+  a previous numerical error from stored dialogue, not invent memory.
+- Latest creator upload: requests naming an exact verified YouTube channel,
+  including Rabbi Shmuley / @ShmuleyShow, fetch an official channel Atom
+  feed, return the latest published title/date and short source link.
+  Other @handles can be resolved through the public YouTube channel page.
+  Generic search snippets remain a discovery fallback, not verified facts.
+- Subsequent `!ask tell me the title name` recovers the same viewer's recent
+  video search (20 minute maximum) and rechecks the official source.
+- Help/control messages now receive an outbound-queue audit status; standalone
+  unaddressed chatter is tagged ignored_unaddressed. IRC NOTICE messages are
+  surfaced as categorized warning events. A successful websocket send is
+  not a platform acknowledgement of public chat delivery.
+- NVIDIA Nemotron 3 Ultra 550B appears in the available model catalog and
+  NVIDIA advertises a trial endpoint, but ORA3 direct inference timed out;
+  do not enable it for latency-sensitive Twitch until live inference passes.

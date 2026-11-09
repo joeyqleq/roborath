@@ -185,6 +185,14 @@ class IRCAdapter:
             tag = "@reply-parent-msg-id=" + reference + " " if reference and THREADED_REPLIES else ""
             await self.ws.send(tag + "PRIVMSG #" + CHANNEL + " :" + answer + "\r\n")
             self.last_send = time.monotonic()
+            if message_id:
+                # A successful websocket send is NOT a Twitch server ACK, but
+                # it proves a control command wasn't silently ignored.
+                self.bridge.db.execute(
+                    """UPDATE chat_events SET answer_text=?,status='answered',
+                       command=COALESCE(command,'control')
+                       WHERE message_id=? AND status='observed'""",(answer,message_id))
+                self.bridge.db.commit()
 
     async def reminder_loop(self):
         """Post due reminders while connected, with the same paced IRC queue."""
@@ -240,6 +248,13 @@ class IRCAdapter:
                 if line.startswith("PING "):
                     await ws.send("PONG " + line[5:] + "\r\n")
                     continue
+                if " NOTICE #" in line:
+                    # A chat command can fail server-side despite websocket
+                    # send success; don't silently discard Twitch notices.
+                    category="rate_or_content" if any(
+                        word in line.lower() for word in ("too quickly","not sent","blocked","rate limit")
+                    ) else "general"
+                    LOG.warning("Twitch IRC NOTICE received category=%s",category)
                 if "Login authentication failed" in line:
                                 raise PermissionError("Twitch rejected IRC login")
                 if "You are permanently banned" in line:

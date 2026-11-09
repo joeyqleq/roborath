@@ -35,8 +35,13 @@ with tempfile.TemporaryDirectory() as tmp:
         bridge.bridge.db.execute(
             "INSERT INTO chat_events(message_id,stream_id,twitch_user_id,twitch_login,created_utc,request_text) "
             "VALUES ('abc-123','stream','1234','viewer','2026-11-09T12:00:00Z','!ask hello')")
+        bridge.bridge.db.execute(
+            "UPDATE chat_events SET status='observed' WHERE message_id='abc-123'")
         bridge.bridge.db.commit()
         await bridge.reply("Evidence suggests the claim is false.", "abc-123")
+        row=bridge.bridge.db.execute(
+            "SELECT command,answer_text,status FROM chat_events WHERE message_id='abc-123'").fetchone()
+        assert row[0]=='control' and row[2]=='answered' and 'false' in row[1]
         assert bridge.ws.sent[0].startswith("PRIVMSG #examplechannel :@viewer ")
         assert "@reply-parent-msg-id=" not in bridge.ws.sent[0]
         assert "false." in bridge.ws.sent[0]

@@ -13,6 +13,8 @@ from notifications import Notifications
 from router import Router, Ledger
 from decision import choose_quality
 from web_lookup import lookup, needs_lookup
+from video_source import newest_video
+from scenarios import classify,history_context,repeated_count_correction,exact_letter_count
 from prompts import FACTCHECK, RESEARCH
 from formatting import compress_for_chat, without_raw_links, sentence_clip
 from analytics import initialize as analytics_initialize, record as analytics_record, remove_user as analytics_remove_user, prune as analytics_prune
@@ -61,12 +63,10 @@ def clean_request(text):
 
 
 def exact_answer(question):
-    """Handle deterministic, small tasks without unreliable LLM counting."""
-    m=re.search(r"how many\s+(?:letters?\s+)?([a-z])(?:['’]s|s)?\s+(?:(?:are\s+)?(?:there|their)\s+)?in\s+([a-z]+)",
-                question.casefold())
-    if m:
-        letter,word=m.groups()
-        return f"{word} has {word.count(letter)} occurrences of '{letter}'."
+    """Small deterministic tasks must never fall through to an LLM guess."""
+    counted=exact_letter_count(question)
+    if counted is not None:
+        return counted
     if re.search(r"prove\s+2\s*\+\s*1\s+is\s+not\s+3",question,re.I):
         return "You can't prove that: 2 + 1 = 3."
     return None
@@ -79,6 +79,9 @@ class Bridge:
         self.session_id = None
         self.stream_cache = ("", 0.0)
         self.prune_after = time.monotonic()+86400
+        # Serialize each speaker's turns; otherwise two rapid messages can
+        # read the same stale context and reply out of order.
+        self._speaker_locks:dict[str,asyncio.Lock]={}
         owner_id = os.getenv("ROBORATH_OWNER_TWITCH_USER_ID", "")
         streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
@@ -128,6 +131,33 @@ class Bridge:
             items.append("Earlier question: " + clean_request(question)[:250])
             items.append("Earlier answer: " + (answer or "").replace("\n", " ")[:320])
         return "\n".join(items)
+
+    def context_rows(self, twitch_user_id:str, stream_id:str, limit:int=7):
+        """Viewer- and stream-scoped answered dialogue, including web searches."""
+        return self.db.execute(
+            """SELECT request_text,answer_text,command FROM chat_events
+               WHERE twitch_user_id=? AND stream_id=? AND status='answered'
+                 AND command IN ('chat','search') AND answer_text IS NOT NULL
+                 AND created_utc >= ?
+               ORDER BY created_utc DESC LIMIT ?""",
+            (twitch_user_id,stream_id,
+             (datetime.now(timezone.utc)-timedelta(minutes=45)).isoformat(),
+             min(max(limit,0),12))).fetchall()
+
+    def previous_search(self, twitch_user_id:str, stream_id:str):
+        row=self.db.execute(
+            """SELECT request_text,created_utc FROM chat_events
+               WHERE twitch_user_id=? AND stream_id=? AND command='search'
+                 AND status='answered' ORDER BY created_utc DESC LIMIT 1""",
+            (twitch_user_id,stream_id)).fetchone()
+        if not row:return ""
+        try:
+            timestamp=datetime.fromisoformat(row[1])
+            if (datetime.now(timezone.utc)-timestamp).total_seconds()>1200:
+                return ""
+        except (TypeError,ValueError):
+            return ""
+        return row[0]
 
     async def mm_post(self, content):
         req = {"channel_id":MM_CHANNEL,"message":content,
@@ -217,6 +247,14 @@ class Bridge:
         return None
 
     async def on_chat(self, event):
+        speaker=event.get("chatter_user_id","")
+        if not speaker:
+            return
+        lock=self._speaker_locks.setdefault(speaker,asyncio.Lock())
+        async with lock:
+            return await self._on_chat_serialized(event)
+
+    async def _on_chat_serialized(self, event):
         raw=event.get("message",{}).get("text","")
         user=event.get("chatter_user_id","")
         login=event.get("chatter_user_login","unknown")
@@ -337,7 +375,20 @@ class Bridge:
         chat_match=re.fullmatch(
             r"(?:!ask|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+(.{2,700})",cmd,re.I)
         search_match=re.fullmatch(r"!search\s+(.{2,700})",cmd,re.I)
-        if chat_match or search_match:
+        # A verified operator can follow up without repeating !ask, but ONLY
+        # on precise, deterministic tasks already discussed, within 90s.
+        owner_followup=False
+        if is_operator and not chat_match and not search_match and cmd.endswith("?") and not cmd.startswith("!"):
+            latest=self.db.execute(
+                """SELECT created_utc FROM chat_events WHERE twitch_user_id=? AND stream_id=?
+                   AND status='answered' AND command IN ('chat','search')
+                   ORDER BY created_utc DESC LIMIT 1""",(user,stream)).fetchone()
+            if latest and exact_letter_count(cmd):
+                try:
+                    owner_followup=(datetime.now(timezone.utc)-datetime.fromisoformat(latest[0])).total_seconds()<=90
+                except (TypeError,ValueError):
+                    owner_followup=False
+        if chat_match or search_match or owner_followup:
             if self.router is None:
                 await self.twitch_reply("model router unavailable; try again shortly",mid)
                 self.db.execute("UPDATE chat_events SET status='failed' WHERE message_id=?",(mid,))
@@ -348,50 +399,68 @@ class Bridge:
                 try:
                     self.db.execute("UPDATE chat_events SET status='pending' WHERE message_id=?",(mid,))
                     self.db.commit()
-                    question=clean_request((search_match or chat_match).group(1))
+                    question=clean_request((search_match or chat_match).group(1) if (search_match or chat_match) else cmd)
+                    prior=self.context_rows(user,stream)
+                    search_history=self.previous_search(user,stream)
+                    scenario=classify(question,explicit_search=bool(search_match),
+                                      previous_search=search_history)
+                    LOG.info("chat scenario=%s command=%s",scenario.kind,
+                             "search" if search_match else "chat")
                     web_enabled=os.getenv("ROBORATH_WEB_SEARCH_ENABLED","true").lower()=="true"
                     if "web search" in question.casefold() and any(
                         t in question.casefold() for t in ("working","enabled","available")):
-                        explanation=("web lookup is enabled for current questions and !search requests."
-                            if web_enabled else "web lookup is disabled by configuration.")
-                        explanation+=" dedicated !fact/!research is still offline until its Mattermost relay is verified."
-                        await self.twitch_reply(explanation,mid)
-                        self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
-                                        ("chat",explanation,"answered",mid))
-                        self.db.commit()
-                        return
-                    sources,source_domain=("", "")
-                    wants_search=bool(search_match or needs_lookup(question))
-                    if web_enabled and wants_search:
-                        sources,source_domain=await lookup(question,self.http,forced=bool(search_match))
-                    fixed=exact_answer(question)
-                    if fixed is not None:
+                        reply=("web lookup is enabled for current questions and !search requests."
+                               if web_enabled else "web lookup is disabled by configuration.")
+                        reply+=" specialist fact/research is offline until its private relay is verified."
+                    elif scenario.kind=="letter_count":
+                        reply=exact_letter_count(question)
+                    elif (fixed:=exact_answer(question)) is not None:
                         reply=fixed
-                    elif wants_search and not sources and (search_match or "weather" in question.casefold() or
-                            "right now" in question.casefold() or "latest" in question.casefold()):
-                        reply="live web lookup unavailable; won't invent current facts."
-                    elif source_domain=="open-meteo.com" and sources:
-                        reply=sources  # Deterministic live weather; never ask model to reinterpret WMO codes.
-                    elif sources:
-                        # DDGS exposes result TITLES, not verified full articles.
-                        # A model fabricated an F1 winner from those snippets;
-                        # show source links instead of manufacturing factual claims.
-                        linked=await shorten_sources(sources,self.http,limit=2)
-                        reply=sentence_clip(linked,budget=370)
+                    elif scenario.kind=="official_video":
+                        if not web_enabled:
+                            reply="web lookup is disabled."
+                        else:
+                            try:
+                                statement,url=await newest_video(scenario.target,self.http)
+                                if not statement:
+                                    reply="I cannot identify a verified YouTube channel. Give its @handle."
+                                else:
+                                    reply=await shorten_sources(statement+" "+url,self.http,limit=1)
+                                    reply=sentence_clip(reply,budget=370)
+                            except (httpx.HTTPError,ValueError,LookupError,KeyError,TypeError) as exc:
+                                LOG.warning("verified video lookup unavailable (%s)",type(exc).__name__)
+                                reply="I couldn't verify the newest upload on that channel right now."
+                    elif scenario.kind=="ambiguous_title":
+                        reply="Which video or channel? I need the account @handle to verify its title."
+                    elif (correction:=repeated_count_correction(question,prior)) is not None:
+                        reply=correction
                     else:
-                        quality=await choose_quality(question,self.http,
-                            enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","true").lower()=="true")
-                        role=("owner" if user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") else
-                              "streamer" if user==os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID") else "viewer")
-                        response=await self.router.complete(
-                           question,tier="chat",
-                           sources=sources,actor_id=user,actor_login=login,actor_role=role,
-                           max_tokens=130,quality=quality)
-                        reply=sentence_clip(without_raw_links(response.text),budget=370)
-                        if source_domain and source_domain.lower() not in reply.lower():
-                            suffix=" [src: "+source_domain+"]"
-                            # Leave room for sender prefix and enforced IRC UTF-8 limit.
-                            reply=reply.encode("utf-8")[:max(1,385-len(suffix))].decode("utf-8","ignore").rstrip()+suffix
+                        sources,source_domain=("","")
+                        wants_search=bool(search_match or needs_lookup(question))
+                        if web_enabled and wants_search:
+                            sources,source_domain=await lookup(question,self.http,
+                                                              forced=bool(search_match))
+                        if wants_search and not sources and (search_match or "weather" in question.casefold() or
+                                "right now" in question.casefold() or "latest" in question.casefold()):
+                            reply="live lookup unavailable; won't invent current facts."
+                        elif source_domain=="open-meteo.com" and sources:
+                            reply=sources
+                        elif sources:
+                            linked=await shorten_sources(sources,self.http,limit=2)
+                            reply=sentence_clip(linked,budget=370)
+                        else:
+                            quality=await choose_quality(question,self.http,
+                                enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","true").lower()=="true")
+                            if scenario.kind=="memory_followup":
+                                quality="strong"
+                            role=("owner" if user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") else
+                                  "streamer" if user==os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID") else "viewer")
+                            response=await self.router.complete(
+                               question,tier="chat",
+                               sources="",actor_id=user,actor_login=login,actor_role=role,
+                               conversation_context=history_context(prior,limit=6),
+                               max_tokens=165,quality=quality)
+                            reply=sentence_clip(without_raw_links(response.text),budget=370)
                     await self.twitch_reply(reply,mid)
                     self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=?",
                                     ("search" if search_match else "chat",reply,"answered",mid))
@@ -406,7 +475,10 @@ class Bridge:
                         LOG.warning("failure reply unavailable (%s)",type(send_err).__name__)
             return
         parsed=parse_public(raw)
-        if not parsed:return
+        if not parsed:
+            self.db.execute("UPDATE chat_events SET status='ignored_unaddressed' WHERE message_id=? AND status='observed'",(mid,))
+            self.db.commit()
+            return
         if not (MM_TOKEN and MM_CHANNEL and
                 os.getenv("ROBORATH_FACT_RELAY_ENABLED", "false").lower()=="true"):
             last_user_call[user]=now
