@@ -103,6 +103,31 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.frames),1)
         self.assertIn("Captain",self.frames[0])
 
+    async def test_numbered_invokes_share_budget_and_refund_failed_answers(self):
+        self.bot.access.invokes.apply(OWNER,'numbered',[VIEWER],'set',2,'stream-one')
+        for i in range(3):
+            self.adapter.last_send=-1e6
+            bridge.last_user_call.clear()
+            await self.bot.on_chat(self.event('limited'+str(i),'!ask how many r are in strawberry?'))
+        self.assertEqual(sum('3 occurrences' in f for f in self.frames),2)
+        self.assertIn('used up',self.frames[-1])
+
+    async def test_bulk_owner_command_resolves_all_before_mutating(self):
+        async def lookup(name):
+            if name=='missinguser':raise LookupError('missing')
+            return VIEWER,'viewerx'
+        self.bot.lookup_twitch_login=lookup
+        await self.bot.on_chat(self.event('bulk','!ask allow viewerx and missinguser',OWNER))
+        self.assertIsNone(self.bot.access.invokes.access(VIEWER))
+        self.assertIn('unchanged',self.frames[-1])
+
+    async def test_global_off_blocks_pending_viewer_send(self):
+        self.bot.access.invokes.apply(OWNER,'open',['*'],'allow',None,'stream-one')
+        await self.bot.on_chat(self.event('beforeoff','!rr help'))
+        self.bot.access.invokes.apply(OWNER,'close',['*'],'global_off',None,'stream-one')
+        with self.assertRaises(PermissionError):await self.adapter.reply('must not send','beforeoff')
+        self.assertTrue(self.bot.access.can_receive(OWNER,'!ask hello',True))
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER

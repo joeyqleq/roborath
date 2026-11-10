@@ -6,6 +6,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 import httpx
 from policy import PolicyStore, parse_public
+from policy import Decision
+from invokes import parse as parse_invokes
 from access_control import TestAccess,parse_admin,requested_capability,AdminIntent
 from formatting import messages
 from shortlinks import shorten_sources
@@ -90,6 +92,7 @@ class Bridge:
         self._speaker_locks:dict[str,asyncio.Lock]={}
         self._owner_admin_replies=set()
         self._privacy_replies={}
+        self._invoke_notices={}
         self._relay_requests={}
         self.live_stream=None
         self.live_verified_until=0.0
@@ -108,6 +111,7 @@ class Bridge:
         for (uid,) in self.db.execute("SELECT twitch_user_id FROM opt_outs").fetchall():
             self.transcript.opt_out(uid)
         self.notifications.purge_retained()
+        self.access.invokes.prune()
         self.router = None
         # Routing credentials are supplied only in a protected runtime env, never from viewer input.
         if any(os.getenv(x+"_API_KEY") and os.getenv(x+"_BASE_URL") for x in ("NVIDIA","NEBIUS","MERGE")):
@@ -268,6 +272,10 @@ class Bridge:
             return
         if message_id in self._owner_admin_replies:
             return
+        if message_id in self._invoke_notices:
+            uid,raw=self._invoke_notices[message_id]
+            if not self.access.can_receive(uid,raw,strict):raise PermissionError('access revoked')
+            return
         if message_id in self._privacy_replies:
             uid=self._privacy_replies[message_id][0]
             if strict and not self.access.is_owner(uid):
@@ -324,6 +332,7 @@ class Bridge:
                 analytics_remove_user(self.db,user)
             if self.policy:self.policy.forget(user)
             self.notifications.forget(user)
+            self.access.invokes.forget(user)
             event["_privacy_reply"]="Your saved chat and derived replies are deleted; future capture is off. Use !optin to return."
             return True
         if command=="!optin":
@@ -471,11 +480,42 @@ class Bridge:
                 try:await self.twitch_reply(event["_privacy_reply"],mid)
                 finally:self._privacy_replies.pop(mid,None)
             return
+        invoke=parse_invokes(raw)
+        if invoke and self.access.is_owner(speaker):
+            mid=event['message_id']
+            try:
+                targets=[]
+                for target in invoke.targets:
+                    if target=='*':targets.append('*')
+                    else:
+                        uid,_=await self.lookup_twitch_login(target)
+                        targets.append(uid)
+                changed=self.access.invokes.apply(speaker,mid,targets,invoke.action,invoke.amount,event['_stream_id'])
+                target_label=', '.join(invoke.targets) or 'everyone'
+                effect=(str(invoke.amount)+(' extra invokes this stream.' if invoke.action=='add' else
+                    ' invokes removed this stream.' if invoke.action=='subtract' else ' total invokes this stream.')) if invoke.amount is not None else (
+                    'viewer access off; owner controls remain available.' if invoke.action=='global_off' else
+                    'access removed.' if invoke.action=='deny' else 'access allowed.')
+                message=('Access updated: '+target_label+'. '+effect) if changed else 'That access command was already applied.'
+            except (ValueError,PermissionError,LookupError,httpx.HTTPError,TypeError) as exc:
+                LOG.warning('invoke control failed %s',type(exc).__name__)
+                message='Access unchanged. Use: give @viewer 2 invokes; allow @viewer; remove @viewer; global allow; global turn off.'
+            if not self.access.muted():
+                self._owner_admin_replies.add(mid)
+                try:await self.twitch_reply(message,mid)
+                finally:self._owner_admin_replies.discard(mid)
+            return
         intent=(AdminIntent("resume") if self.access.matches_wake_phrase(speaker,raw) else parse_admin(raw))
         if intent and self.access.is_owner(speaker):
             # Control commands bypass the per-speaker LLM lock. Even if an AI
             # reply is pending, owner silence is effective immediately.
             return await self._owner_admin(event,intent)
+        if self.access.is_owner(speaker) and re.search(r'\b(?:allow|grant|revoke|give|remove|take away|disable)\b.*\b(?:invokes?|invocations?|permissions?|access|commands|abilities)\b',raw,re.I):
+            if not self.access.muted():
+                mid=event['message_id'];self._owner_admin_replies.add(mid)
+                try:await self.twitch_reply('I could not parse that access change. Try: give @viewer 2 invokes; allow @alice and @bob; remove @viewer; global turn off.',mid)
+                finally:self._owner_admin_replies.discard(mid)
+            return
         if self.access.muted():
             return  # don't consume any AI quota or work while silent
         if not self.access.can_receive(speaker,raw,strict=strict):
@@ -484,7 +524,26 @@ class Bridge:
         async with lock:
             if not self.access.can_receive(speaker,raw,strict=strict):
                 return
-            return await self._on_chat_serialized(event)
+            mid=event['message_id'];stream=event['_stream_id']
+            ai=bool(parse_public(raw) or re.match(r'^(?:!ask |!rr ask |!search |(?:hey )?roborath\s*[:,!]|@roborath ask )',raw,re.I))
+            reserved=False
+            if ai:
+                reserved=self.access.invokes.reserve(speaker,mid,stream)
+                if not reserved:
+                    self._privacy_replies[mid]=(speaker,event.get('chatter_user_login',''))
+                    try:
+                        # Direct response still passes normal live access checks.
+                        if not self.access.muted() and self.access.can_receive(speaker,raw,strict):
+                            self._invoke_notices[mid]=(speaker,raw)
+                            try:await self.twitch_reply('Your invokes for this stream are used up. Ask Joeyleq for more.',mid)
+                            finally:self._invoke_notices.pop(mid,None)
+                    finally:self._privacy_replies.pop(mid,None)
+                    return
+            try:return await self._on_chat_serialized(event)
+            finally:
+                row=self.db.execute('SELECT command,status FROM chat_events WHERE message_id=?',(mid,)).fetchone()
+                if reserved and (not row or row[0] not in ('chat','search','fact','research') or row[1]!='answered'):
+                    self.access.invokes.refund(mid)
 
     async def _on_chat_serialized(self, event):
         raw=event.get("message",{}).get("text","")
@@ -721,7 +780,8 @@ class Bridge:
         capability,question=parsed
         # Explicit fail-closed until immutable Twitch owner/streamer IDs resolve.
         if self.policy is None:return
-        decision=self.policy.check_or_reserve(user,mid,capability,stream)
+        decision=(Decision(True,'shared invoke allowance') if self.access.invokes.limit(user,stream) is not None
+                  else self.policy.check_or_reserve(user,mid,capability,stream))
         if not decision.allowed:
             state="quota_denied" if "limit reached" in decision.reason else "denied"
             self.db.execute("UPDATE chat_events SET command=?,status=? WHERE message_id=?",

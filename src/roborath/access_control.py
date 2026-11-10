@@ -11,6 +11,7 @@ import re
 import sqlite3
 from policy import parse_public
 from policy import OWNER_TWITCH_ID
+from invokes import InvokeStore
 
 CAPABILITIES = ("conversation", "fact", "research")
 LOGIN = r'@?["\'“”‘’]?([a-z][a-z0-9_]{2,24})["\'“”‘’]?'
@@ -126,6 +127,7 @@ class TestAccess:
            message_id TEXT PRIMARY KEY, action TEXT NOT NULL, target_id TEXT,
            capability TEXT, at_utc TEXT NOT NULL)""")
         self.db.commit()
+        self.invokes=InvokeStore(db,self.owner_id,self.broadcaster_id)
 
     def is_owner(self,user_id:str)->bool:
         return bool(self.owner_id and self.owner_id.isdigit() and user_id==self.owner_id)
@@ -187,6 +189,8 @@ class TestAccess:
     def allowed(self,user_id:str,cap:str)->bool:
         if not self.owner_id or not self.owner_id.isdigit() or self.muted():return False
         if self.is_owner(user_id):return True
+        explicit=self.invokes.access(user_id)
+        if explicit is not None:return explicit and cap in (*CAPABILITIES,'help')
         if self.broadcaster_id.isdigit() and user_id==self.broadcaster_id and cap in CAPABILITIES:
             return True
         if os.getenv("ROBORATH_PUBLIC_ACCESS_ENABLED","false").lower()=="true" and cap in (*CAPABILITIES,"help"):
@@ -197,6 +201,8 @@ class TestAccess:
     def can_receive(self,user_id:str,raw:str,strict:bool=True)->bool:
         if self.muted():return False
         if self.is_owner(user_id):return True
+        explicit=self.invokes.access(user_id)
+        if explicit is not None:return explicit and requested_capability(raw) in (*CAPABILITIES,'help')
         # During owner-only QA grants are intentionally inert. A display name,
         # prior grant or streamer claim cannot bypass this global boundary.
         if strict:

@@ -101,3 +101,18 @@ Access grants only work when owner-only QA is disabled for an approved public te
 ## Diagnosing no reply
 
 Check the deployed commit and process, then owner-only QA flag and global mute. For an authorized user, check the exact parser spelling and that a complete question followed the command; then inspect the applicable cooldown/quota, relay/model availability, reply queue and Twitch connection. A successful websocket send does not prove Twitch displayed the message. In owner-only QA, silence for non-owner messages is intentional, even when the sender has a stored grant.
+
+## Owner bulk and shared invoke controls
+
+Verified owner may use these directly or after `!ask`:
+
+- `allow alice` / `allow alice and bob` / `allow alice, bob, carol`: enable all AI capabilities, with no shared numeric limit.
+- `give alice 3 invokes`: set a total of 3 successful AI requests for the current stream; already-used requests count toward that total.
+- `add 2 invokes to alice and bob`: increase each allowance by 2.
+- `remove 1 invoke from alice`: lower the current stream allowance by 1.
+- `allow everyone 2 invokes`: shared per-viewer allowance of 2 in this stream. Individual explicit rules take precedence.
+- `remove alice and bob` / `take away alice access`: deny these users even if global access is enabled.
+- `global allow`: enable everyone; explicit individual denials remain.
+- `global turn off` / `remove everyone`: block all non-owner invocations, including previously granted testers. Owner administration remains available. `stop talking` is the separate full silence command.
+
+Numbered limits cover conversation, search, fact and research together; help and controls do not spend them. Backend failures return reserved allowance. Numbers apply to the current stream; access persists afterward with normal per-feature limits (conversation has its normal cooldown). Owner and streamer are exempt from numeric quotas, but explicit/global access denial still blocks the streamer. Global off must be reversed with global allow. All target usernames resolve through Twitch before any member of a bulk grant changes. Unrecognized permission requests return a deterministic error instead of passing to the model.

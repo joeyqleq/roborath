@@ -23,7 +23,7 @@ TOPICS = {
     "reminders": "Queue: !rr remind 20m drink water. List: !rr reminders. Cancel: !rr reminder cancel 1. Delay: 1m to 7d, five outstanding per user. Delivery waits for verified live public mode and respects silence.",
     "privacy": "!privacy explains retention. !forgetme or !optout deletes your stored chat data and opts out; !optin resumes interaction. Only public chat is seen; no whispers or stream video.",
     "permissions": "Owner joeyleq alone grants or removes QA access and controls silence. The streamer can use AI without quotas when public use is enabled, but cannot administer permissions. Ask !rr help admin.",
-    "admin": "Owner: allow @viewer to fact check; give @viewer all AI abilities; remove @viewer from testing; show access. Stop talking silences everything. Stop replying unless I say banana saves a resume phrase; only your exact banana resumes. Resume talking also works.",
+    "admin": "Owner: allow alice and bob; give alice 3 invokes; add 2 invokes to alice; remove 1 invoke from alice; remove alice and bob; allow everyone 2 invokes; global allow; global turn off. Numbers share one AI allowance for this stream. Stop talking silences all replies.",
 }
 
 
