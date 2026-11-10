@@ -31,3 +31,11 @@ Done: Sender-aware statistics and clarification refunds deployed at 23b0753; Sae
 Next: Broader handoff source/crawler verification; Google setup after account authorization.
 Constraints: Preserve live grants/theme, private data and local handoff edits.
 Verification: 41 focused tests, lint, CI and installed-code query; service healthy.
+
+
+[JQMEM v2 | kind=milestone | app=roborath | harness=chatgpt-desktop]
+Completed 2026-11-10 05:03 UTC: `06b49f6` deployed through the standard installer. 220 full local tests, correctness lint and GitHub CI 42759540455 passed on Python 3.13/3.14. Generalized the observed mom-joke, double-entendre, profanity and gottem vibe in the conversation prompt; saved compact `chat_style` owner note to ORA3 with 30-day expiry. The reserved topic is included without requiring a matching topic word; verified inclusion for a rap request. Treat sexual boasts as jokes, never evidence about real encounters or orientation. No private user sexual profiles or raw joke archive were added.
+
+Added natural `give alice unlimited invokes for this stream` plus bulk/global targets, optional stream suffix, title and observed spelling variants. `show access` renders unlimited correctly. Shared invoke accounting continues while unlimited, adding a numeric gift preserves unlimited, and explicit set/revoke/global-off remain effective. This is a stream-scoped allowance, not a provider spend-limit override. Owner's actual SaeedMSR request was verified against immutable owner ID and current live stream, username resolved through authenticated Helix, then replayed exactly once using original message ID `42829764-04c9-49df-8604-62e3fbc4b6ec`. Installed access report confirms @saeedmsr allowed unlimited; next-stream limit is None (normal legacy quotas). No synthetic public post.
+
+Backup `/var/lib/roborath/backups/chat-style-unlimited-20261110T050313Z` includes pre-release source and SQLite snapshot. Service active/running, zero restarts, Twitch connection validated. Mem0 writes still require connector reauthentication after retry; explicit preference saved to local ad_hoc memory note as well as bot context. Current request is complete. Broader original handoff source/crawler verification and Google authorization/integration remain unfinished.
