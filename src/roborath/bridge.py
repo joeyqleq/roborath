@@ -10,6 +10,7 @@ from policy import Decision
 from invokes import parse as parse_invokes
 from status_report import render_status,render_access
 from news import is_news_query,fetch_news
+from theme import StreamTheme
 from access_control import TestAccess,parse_admin,requested_capability,AdminIntent
 from formatting import messages
 from shortlinks import shorten_sources
@@ -96,6 +97,7 @@ class Bridge:
         self._privacy_replies={}
         self._invoke_notices={}
         self._owner_status_replies=set()
+        self._theme_posts=set()
         self._relay_requests={}
         self.live_stream=None
         self.live_verified_until=0.0
@@ -105,6 +107,7 @@ class Bridge:
         streamer_id = os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID", "")
         self.policy = PolicyStore(self.db, owner_id, streamer_id) if owner_id and streamer_id else None
         self.access=TestAccess(self.db,owner_id)
+        self.theme=StreamTheme(self.db)
         self.db.execute('CREATE TABLE IF NOT EXISTS rr_identity_names(user_id TEXT PRIMARY KEY,login TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS rr_owner_notes(topic TEXT PRIMARY KEY,note TEXT NOT NULL,created_utc TEXT NOT NULL)')
         self.db.execute('DELETE FROM rr_owner_notes WHERE created_utc<?',((datetime.now(timezone.utc)-timedelta(days=30)).isoformat(),))
@@ -276,6 +279,12 @@ class Bridge:
     def authorize_reply(self, message_id):
         """Re-evaluate mutable permissions at every actual outbound boundary."""
         if message_id and message_id in self._owner_status_replies:return
+        if message_id in self._theme_posts:
+            sid=(self.live_stream or {}).get('id','')
+            if (self.access.muted() or not self.theme.active(sid) or
+                time.monotonic()>=self.live_verified_until or self.access.invokes.access('theme-public') is False):
+                raise PermissionError('theme paused or offline')
+            return
         if self.access.muted():
             raise PermissionError("global mute")
         strict=os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true"
@@ -482,6 +491,12 @@ class Bridge:
         if not isinstance(raw,str) or not event.get("message_id"):
             return
         control=re.sub(r'^(?:!ask\s+|!rr\s+(?:ask\s+)?)','',raw.strip(),flags=re.I).strip().casefold().rstrip('.?!')
+        if control in ('theme off','theme status') and self.access.is_owner(speaker):
+            if control=='theme off':self.theme.stop()
+            mid=event['message_id'];self._privacy_replies[mid]=(speaker,event.get('chatter_user_login',''));self._owner_status_replies.add(mid)
+            try:await self.twitch_reply(self.theme.status(),mid)
+            finally:self._owner_status_replies.discard(mid);self._privacy_replies.pop(mid,None)
+            return
         teaching=re.fullmatch(r'!rr\s+(remember|forget)\s+([a-z0-9_-]{2,30})(?:\s*=>\s*(.{1,350}))?',raw.strip(),re.I)
         if teaching and self.access.is_owner(speaker):
             action,topic,note=teaching.groups()
@@ -810,7 +825,7 @@ class Bridge:
                             response=await self.router.complete(
                                question,tier="chat",
                                sources="",actor_id=user,actor_login=login,actor_role=role,
-                               conversation_context=history_context(prior,limit=5)+self.shared_chat_context(stream,question,mid),
+                               conversation_context=history_context(prior,limit=5)+self.shared_chat_context(stream,question,mid)+self.theme.context(stream,question),
                                max_tokens=165,quality=quality,stream_id=stream)
                             reply=sentence_clip(without_raw_links(response.text),budget=370)
                     await self.twitch_reply(reply,mid)

@@ -119,6 +119,8 @@ Numbered limits cover conversation, search, fact and research together; help and
 
 ## Status, access reports and taught context
 
+Temporary theme authorized 2026-11-10: Hegseth/Trump/war accountability, current verified stream plus the next two distinct verified streams. `!rr theme status` reports consumption and `!rr theme off` stops it. Occasional public editorial comments are explicitly authorized for this campaign, up to three per stream spaced at least 45 minutes apart; muted/global-off/offline states suppress them. This exception does not open general public invocations or other QA-gated timers. No repeat after restart. Fourteen-day safety expiry. Theme context is supplied only to relevant model questions. News status must be refreshed: an impeachment push is not a completed impeachment or removal. Scapegoating is framed as interpretation, not a proven motive. The bot does not receive stream video/audio.
+
 - `!rr status` or `!ask status`: compact state, active stream, model and shared invoke usage. Owner only.
 - `show access`, `!rr access status`, or `!ask who is currently allowed to use you?`: paginated access report. `show access 2` selects page 2.
 - Global off always excludes Joeyleq. While `stop talking` suppresses ordinary replies, owner status/access reports and resume remain available.

@@ -128,6 +128,18 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PermissionError):await self.adapter.reply('must not send','beforeoff')
         self.assertTrue(self.bot.access.can_receive(OWNER,'!ask hello',True))
 
+    async def test_authorized_theme_exception_remains_mutable_at_wire_boundary(self):
+        self.bot.theme.activate();self.bot.theme.observe('stream-one',True)
+        self.bot.live_stream={'id':'stream-one'};self.bot.live_verified_until=time.monotonic()+60
+        key='theme:stream-one';self.bot._theme_posts.add(key)
+        await self.adapter.reply('A topical political joke.',key)
+        self.assertEqual(len(self.frames),1)
+        self.bot.access.set_mute(OWNER,'mutetheme',True)
+        with self.assertRaises(PermissionError):await self.adapter.reply('Blocked.',key)
+        self.bot.access.set_mute(OWNER,'unmutetheme',False)
+        self.bot.theme.stop()
+        with self.assertRaises(PermissionError):await self.adapter.reply('Blocked.',key)
+
     async def test_owner_status_and_access_reports_work_while_muted(self):
         self.bot.access.invokes.apply(OWNER,'globaloff',[],'global_off',None,'stream-one')
         self.bot.access.set_mute(OWNER,'silence',True)

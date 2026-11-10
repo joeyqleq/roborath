@@ -176,6 +176,7 @@ class IRCAdapter:
                         started=details.get("started_at")
                         self.bridge.live_stream={"id":identity,"started_at":started}
                         self.bridge.live_verified_until=time.monotonic()+60
+                        self.bridge.theme.observe(identity,True)
                         self.bridge.transcript.observe_stream(identity,self.room_id,started)
                         if started:
                             self.bridge.notifications.start_stream(identity,datetime.fromisoformat(started.replace("Z","+00:00")))
@@ -287,6 +288,15 @@ class IRCAdapter:
                 stream=await self.stream_id()
                 strict=os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true"
                 live=bool(self.bridge.live_stream and time.monotonic()<self.bridge.live_verified_until)
+                # This scoped campaign has explicit owner authorization for
+                # public remarks; ordinary QA-gated timers remain separate.
+                if live and not self.bridge.access.muted() and self.bridge.access.invokes.access('theme-public') is not False:
+                    themed=self.bridge.theme.reserve_post(stream,time.time())
+                    if themed:
+                        key='theme:'+stream
+                        self.bridge._theme_posts.add(key)
+                        try:await self.reply(themed,key)
+                        finally:self.bridge._theme_posts.discard(key)
                 promotion=self.bridge.notifications.follow_tick(stream,live=live,
                     muted=self.bridge.access.muted(),owner_only=strict)
                 if promotion:
