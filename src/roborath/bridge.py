@@ -711,7 +711,7 @@ class Bridge:
         if chat_match and not parsed:
             auto_question=chat_match.group(1)
             # Local statistics and controls never need a model to route them.
-            if self.transcript.activity_question(stream,auto_question) or exact_answer(auto_question):
+            if self.transcript.activity_question(stream,auto_question,speaker_id=user) or exact_answer(auto_question):
                 route='chat'
             else:route=await choose_route(auto_question,self.http)
             LOG.info('ask pipeline=%s',route)
@@ -754,7 +754,7 @@ class Bridge:
                              "search" if search_match else "chat")
                     web_enabled=os.getenv("ROBORATH_WEB_SEARCH_ENABLED","true").lower()=="true"
                     memory_query=bool(re.search(r"\b(?:chat|user|viewer)\b.*\b(?:said|say|mentioned|discussion|ago|correct)|\b(?:who (?:first )?mentioned|what happened before|summari[sz]e the discussion|has anyone corrected)\b",question,re.I))
-                    activity=self.transcript.activity_question(stream,question)
+                    activity=self.transcript.activity_question(stream,question,speaker_id=user)
                     if activity:
                         reply=activity
                     elif memory_query:
@@ -846,7 +846,7 @@ class Bridge:
                             reply=sentence_clip(without_raw_links(response.text),budget=370)
                     await self.twitch_reply(reply,mid)
                     self.db.execute("UPDATE chat_events SET command=?,answer_text=?,status=? WHERE message_id=? AND status!='privacy_redacted'",
-                                    ("search" if search_match else "chat",reply,"answered",mid))
+                                    ('clarification' if reply.startswith('Which Twitch username should I count?') else "search" if search_match else "chat",reply,"answered",mid))
                     self.db.commit()
                 except Exception as err:
                     LOG.warning("conversational model error %s",type(err).__name__)

@@ -208,6 +208,17 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Rank #',self.frames[-1])
         self.assertNotIn("don't have access",self.frames[-1])
 
+    async def test_self_reference_uses_authenticated_user_without_spending_a_clarification(self):
+        self.bot.transcript.record('stream-one','self-first',VIEWER,'viewerx','one two three')
+        self.bot.access.invokes.apply(OWNER,'self-grant',[VIEWER],'set',4,'stream-one')
+        await self.bot.on_chat(self.event('mywords',"!ask how many words did I say so far? what's my rank?"))
+        self.assertIn('words',self.frames[-1]);self.assertIn('Rank #',self.frames[-1])
+        self.assertNotIn('Which Twitch username',self.frames[-1])
+        self.assertEqual(self.bot.db.execute("SELECT status FROM chat_events WHERE message_id='mywords'").fetchone()[0],'answered')
+        self.adapter.last_send=-1e6;bridge.last_user_call.clear()
+        await self.bot.on_chat(self.event('nobody','!ask how many words overall?'))
+        self.assertEqual(self.bot.db.execute("SELECT COUNT(*) FROM rr_invoke_usage WHERE user_id=? AND used=1",(VIEWER,)).fetchone()[0],1)
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER

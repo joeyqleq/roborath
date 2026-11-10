@@ -507,7 +507,7 @@ class TranscriptStore:
                     "SELECT start_utc,end_utc,reason FROM transcript_gaps WHERE stream_id=? ORDER BY start_utc", (str(stream_id),))],
                 "coverage_note": "Only messages received while connected are archived; full-stream coverage is unknown."}
 
-    def activity_question(self,stream_id,question,now=None):
+    def activity_question(self,stream_id,question,now=None,speaker_id=None):
         """Exact retained-chat statistics, never viewer join/watch-time inference."""
         value=re.sub(r'\bhow+\b','how',str(question).strip().replace('\u200b',''),flags=re.I)
         if re.search(r'\b(?:leaderboard|who (?:here )?has (?:spoken|talked|typed|written|said) the most|most (?:talkative|active)|top (?:chatters|speakers))\b',value,re.I):
@@ -525,6 +525,10 @@ class TranscriptStore:
         if not named:
             named=re.search(r'\b(?:did|has|have)\s+@?([a-z0-9_]{3,25})\s+(?:say|said|send|sent|write|written|speak|spoken|typed|been|come|join|start|first)',value,re.I)
         if named:login=next(x for x in named.groups() if x).lower()
+        elif speaker_id and re.search(r'\b(?:i|me|my)\b',value,re.I):
+            row=self.db.execute('SELECT login FROM transcript_messages WHERE stream_id=? AND twitch_user_id=? ORDER BY created_utc DESC LIMIT 1',(stream_id,str(speaker_id))).fetchone()
+            if not row:return 'No retained messages from your verified account are captured in this stream yet.'
+            login=row[0]
         else:
             # Resolve exact observed login tokens for looser phrasing such as
             # "word count for SAEEDMSR"; never guess a display-name identity.
