@@ -82,6 +82,7 @@ def parse_privmsg(line):
         "room_id": tags.get("room-id", ""),
         "created_utc": created,
         "reply_parent_user_id": tags.get("reply-parent-user-id", ""),
+        "reply_parent_user_login": tags.get("reply-parent-user-login", ""),
     }
 
 

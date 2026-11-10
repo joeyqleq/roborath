@@ -28,6 +28,10 @@ class AnalyticsTest(unittest.TestCase):
         row=self.db.execute("SELECT message_count,word_count,reply_count,native_reply_count,bot_reply_count FROM activity_buckets").fetchone()
         self.assertEqual(row,(1,2,1,0,1))
 
+    def test_reply_content_metrics_exclude_recipient(self):
+        record(self.db,'u','alice','s',self.now,'reply','bob, Hello world!',is_reply=True,reply_login='bob')
+        self.assertEqual(self.db.execute('SELECT word_count,character_count FROM activity_buckets').fetchone(),(2,11))
+
     def test_regular_aggregates_daily_counts_no_psych_inference(self):
         for day in range(3):
             for index in range(12):

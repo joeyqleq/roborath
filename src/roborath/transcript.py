@@ -73,6 +73,8 @@ def initialize(db: sqlite3.Connection) -> None:
       FOREIGN KEY(stream_id) REFERENCES transcript_sessions(stream_id)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS transcript_time ON transcript_messages(stream_id,created_utc)")
+    if 'reply_login' not in {r[1] for r in db.execute('PRAGMA table_info(transcript_messages)')}:
+        db.execute("ALTER TABLE transcript_messages ADD COLUMN reply_login TEXT NOT NULL DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS transcript_user_time ON transcript_messages(stream_id,twitch_user_id,created_utc)")
     db.execute("""CREATE TABLE IF NOT EXISTS transcript_summaries (
       summary_id INTEGER PRIMARY KEY,
@@ -111,7 +113,7 @@ class TranscriptStore:
 
     def record(self, stream_id: str, message_id: str, twitch_user_id: str,
                login: str, text: str, created_utc: str | datetime | None = None,
-               received_utc: str | datetime | None = None) -> bool:
+               received_utc: str | datetime | None = None, reply_login: str = '') -> bool:
         """Record an observed public message once. Returns False for opt-outs/dupes.
 
         `created_utc` should be Twitch's server timestamp when supplied. For IRC
@@ -141,10 +143,10 @@ class TranscriptStore:
                   (stream_id,first_observed_utc,last_observed_utc,message_count)
                   VALUES(?,?,?,0)""", (stream_id, created, created))
                 result = self.db.execute("""INSERT OR IGNORE INTO transcript_messages
-                  (stream_id,message_id,twitch_user_id,login,created_utc,received_utc,text)
-                  VALUES(?,?,?,?,?,?,?)""",
+                  (stream_id,message_id,twitch_user_id,login,created_utc,received_utc,text,reply_login)
+                  VALUES(?,?,?,?,?,?,?,?)""",
                   (stream_id, str(message_id), str(twitch_user_id), str(login).lower(),
-                   created, received, message))
+                   created, received, message,str(reply_login)))
                 if result.rowcount != 1:
                     return False
                 self.db.execute("""INSERT INTO transcript_fts
@@ -504,6 +506,30 @@ class TranscriptStore:
                 "gaps": [dict(start_utc=x[0], end_utc=x[1], reason=x[2]) for x in self.db.execute(
                     "SELECT start_utc,end_utc,reason FROM transcript_gaps WHERE stream_id=? ORDER BY start_utc", (str(stream_id),))],
                 "coverage_note": "Only messages received while connected are archived; full-stream coverage is unknown."}
+
+    def activity_question(self,stream_id,question,now=None):
+        """Exact retained-chat statistics, never viewer join/watch-time inference."""
+        value=str(question).strip()
+        if not re.search(r'\b(?:how many (?:words|characters|chars|messages|replies)|what time|when did|how long|first message|first spoke)\b',value,re.I):return None
+        named=re.search(r'\b(?:user|viewer)\s+@?([a-z0-9_]{3,25})\b|@([a-z0-9_]{3,25})\b',value,re.I)
+        if not named:
+            named=re.search(r'\b(?:did|has)\s+@?([a-z0-9_]{3,25})\s+(?:say|send|write|speak|been|come|join|start|first)',value,re.I)
+        if not named:return None
+        login=next(x for x in named.groups() if x).lower()
+        identity=self.db.execute('SELECT twitch_user_id FROM transcript_messages WHERE stream_id=? AND login=? ORDER BY created_utc DESC LIMIT 1',(stream_id,login)).fetchone()
+        if not identity:return '@'+login+': no retained messages captured in this stream. Joining/watching time is not recorded.'
+        uid=identity[0]
+        rows=self.db.execute('SELECT created_utc,text,login,reply_login FROM transcript_messages WHERE stream_id=? AND twitch_user_id=? ORDER BY created_utc',(stream_id,uid)).fetchall()
+        first=datetime.fromisoformat(rows[0][0]);reference=datetime.fromisoformat(_utc(now))
+        minutes=max(0,int((reference-first).total_seconds()/60))
+        from text_metrics import content_counts
+        counts=[content_counts(r[1],r[2],r[3]) for r in rows]
+        words=sum(r[0] for r in counts);chars=sum(r[1] for r in counts)
+        stamp=first.strftime('%H:%M UTC')
+        text=f'@{login}: {len(rows)} captured messages, {words} words, {chars} characters (no spaces/usernames); first spoke {stamp}, {minutes//60}h {minutes%60}m ago. '
+        if re.search(r'\b(?:come|join|entered)\b',value,re.I):text+='First captured speech, not join time. '
+        text+='Retained chat only; missed/deleted messages excluded.'
+        return text
 
     def _refresh_sessions(self, stream_ids: set[str]) -> None:
         for stream in stream_ids:

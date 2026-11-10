@@ -160,6 +160,18 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_chat(self.event('unteach','!rr forget music',OWNER))
         self.assertEqual(self.bot.db.execute('SELECT COUNT(*) FROM rr_owner_notes').fetchone()[0],0)
 
+    async def test_hours_old_word_counts_and_first_speech_are_exact_not_join_time(self):
+        start=datetime.now(timezone.utc)-timedelta(hours=3)
+        self.bot.transcript.record('stream-one','first-long-ago',VIEWER,'viewerx','one two three',start)
+        self.bot.transcript.record('stream-one','second-long-ago',VIEWER,'viewerx','four five',start+timedelta(hours=1))
+        answer=self.bot.transcript.activity_question('stream-one','how many words did user viewerx say from the beginning?')
+        self.assertIn('2 captured messages, 5 words',answer)
+        self.assertIn('3h 0m ago',answer)
+        join=self.bot.transcript.activity_question('stream-one','what time did user viewerx come into the stream?')
+        self.assertIn('not join time',join)
+        self.bot.transcript.delete_message('second-long-ago')
+        self.assertIn('1 captured messages, 3 words',self.bot.transcript.activity_question('stream-one','how many words did viewerx say?'))
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER

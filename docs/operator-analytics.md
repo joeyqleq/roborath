@@ -17,3 +17,9 @@ python3 -m report analytics --db /var/lib/roborath/chat.sqlite3 --stream STREAM_
 ```
 
 Use an actual ID from the first command. Transcript output is plain `username: message`; timestamps and IDs remain in SQLite for retrieval. The export excludes expired/opted-out messages. Keep exports private and delete them on the same retention schedule; automatic database pruning cannot delete operator-created copies elsewhere. No video/audio transcription or recovery of disconnected chat is provided. These source changes are not yet deployed.
+
+## Exact retained-message content counts
+
+Word and character totals exclude username metadata, leading own/reply username labels, and `@username` mentions. Character counts exclude all whitespace and invisible formatting controls; punctuation counts. Unicode characters are counted as code points, so a composed emoji may contain multiple characters. Names used as ordinary prose remain content. Reply-recipient login metadata is stored separately for new messages. Older stored messages can exclude visible `@mentions`; unavailable historical reply metadata cannot be reconstructed.
+
+Natural questions: `!ask how many words did user saeedmsr say from the beginning?`, `!ask how many characters did user saeedmsr write?`, `!ask what time did user saeedmsr come into the stream?`, `!ask how long has user saeedmsr been speaking?`. These query the current stream's retained messages directly, including hours-old rows; no model counting or browser chat-history buffer is involved. First speech is not a join time or continuous speaking/watch duration. Refreshing the browser does not delete the database. Twitch moderation deletion and opt-out commands do delete corresponding stored data. Missing pre-connection history cannot be recovered by this recorder.

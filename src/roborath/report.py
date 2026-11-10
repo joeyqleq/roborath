@@ -29,9 +29,9 @@ def render(db,kind,stream_id=None):
     args=[cutoff[:10]]
     if stream_id:where+=" AND stream_id=?";args.append(stream_id)
     rows=db.execute("""SELECT twitch_user_id,MAX(twitch_login),SUM(message_count),
-        SUM(word_count),SUM(native_reply_count),SUM(bot_reply_count) FROM activity_buckets WHERE """+where+
+        SUM(word_count),SUM(native_reply_count),SUM(bot_reply_count),SUM(character_count) FROM activity_buckets WHERE """+where+
         " GROUP BY twitch_user_id ORDER BY SUM(message_count) DESC",args)
-    return json.dumps([dict(zip(("user_id","username","messages","words","native_replies_sent","bot_replies_received"),r)) for r in rows],indent=2)
+    return json.dumps([dict(zip(("user_id","username","messages","words","native_replies_sent","bot_replies_received","characters"),r)) for r in rows],indent=2)
 
 
 def main():

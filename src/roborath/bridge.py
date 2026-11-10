@@ -369,13 +369,13 @@ class Bridge:
             return True
         if self.transcript.is_opted_out(user):return False
         fresh=self.transcript.record(stream,mid,user,login,raw,
-            created_utc=event.get("created_utc"))
+            created_utc=event.get("created_utc"),reply_login=event.get('reply_parent_user_login',''))
         if fresh:
             stamp=event.get("created_utc")
             try:observed_at=datetime.fromisoformat(stamp.replace("Z","+00:00")) if stamp else None
             except (ValueError,TypeError):observed_at=None
             analytics_record(self.db,user,login,stream,timestamp=observed_at,
-                message_id=mid,text=raw,is_reply=bool(event.get("reply_parent_user_id")))
+                message_id=mid,text=raw,is_reply=bool(event.get("reply_parent_user_id")),reply_login=event.get('reply_parent_user_login',''))
             self.db.commit()
             if time.monotonic()>=self._summary_after.get(stream,0):
                 now=datetime.now(timezone.utc)
@@ -740,7 +740,10 @@ class Bridge:
                              "search" if search_match else "chat")
                     web_enabled=os.getenv("ROBORATH_WEB_SEARCH_ENABLED","true").lower()=="true"
                     memory_query=bool(re.search(r"\b(?:chat|user|viewer)\b.*\b(?:said|say|mentioned|discussion|ago|correct)|\b(?:who (?:first )?mentioned|what happened before|summari[sz]e the discussion|has anyone corrected)\b",question,re.I))
-                    if memory_query:
+                    activity=self.transcript.activity_question(stream,question)
+                    if activity:
+                        reply=activity
+                    elif memory_query:
                         result=self.transcript.answer_question(stream,question,limit=3)
                         quotes=[]
                         for item in result["excerpts"]:

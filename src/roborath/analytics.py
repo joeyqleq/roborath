@@ -6,6 +6,7 @@ personal traits. Public transcript retention is handled by its separate store.
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 import re
+from text_metrics import content_counts
 
 DEFAULT_RETENTION_DAYS = 30
 
@@ -22,7 +23,7 @@ def _day(value=None):
 
 
 def _words(text):
-    return len(re.findall(r"\b[\w’'-]+\b", str(text), flags=re.UNICODE))
+    return content_counts(text)[0]
 
 
 def initialize(db):
@@ -45,6 +46,8 @@ def initialize(db):
       PRIMARY KEY(twitch_user_id,stream_id,bucket_start_utc)
     )""")
     bucket_columns = {row[1] for row in db.execute("PRAGMA table_info(activity_buckets)")}
+    if 'character_count' not in bucket_columns:
+        db.execute('ALTER TABLE activity_buckets ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0')
     if "native_reply_count" not in bucket_columns:
         db.execute("ALTER TABLE activity_buckets ADD COLUMN native_reply_count INTEGER NOT NULL DEFAULT 0")
     if "bot_reply_count" not in bucket_columns:
@@ -79,23 +82,24 @@ def initialize(db):
     db.commit()
 
 
-def _upsert(db, user_id, login, stream_id, timestamp, *, messages=0, words=0, replies=0, native_replies=0, bot_replies=0):
+def _upsert(db, user_id, login, stream_id, timestamp, *, messages=0, words=0, characters=0,replies=0, native_replies=0, bot_replies=0):
     day = _day(timestamp)
     db.execute("""INSERT INTO activity_buckets
-      (twitch_user_id,twitch_login,stream_id,bucket_start_utc,message_count,word_count,reply_count,native_reply_count,bot_reply_count)
-      VALUES(?,?,?,?,?,?,?,?,?)
+      (twitch_user_id,twitch_login,stream_id,bucket_start_utc,message_count,word_count,reply_count,native_reply_count,bot_reply_count,character_count)
+      VALUES(?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(twitch_user_id,stream_id,bucket_start_utc)
       DO UPDATE SET message_count=message_count+excluded.message_count,
         word_count=word_count+excluded.word_count,
+        character_count=character_count+excluded.character_count,
         reply_count=reply_count+excluded.reply_count,
         native_reply_count=native_reply_count+excluded.native_reply_count,
         bot_reply_count=bot_reply_count+excluded.bot_reply_count,
         twitch_login=excluded.twitch_login
-    """, (str(user_id), str(login or "")[:25], str(stream_id), day, messages, words, replies, native_replies, bot_replies))
+    """, (str(user_id), str(login or "")[:25], str(stream_id), day, messages, words, replies, native_replies, bot_replies,characters))
     return day
 
 
-def record(db, user_id, login, stream_id, timestamp=None, message_id=None, text="", *, is_reply=False):
+def record(db, user_id, login, stream_id, timestamp=None, message_id=None, text="", *, is_reply=False,reply_login=''):
     """Count a public incoming message once; pass Twitch ID to guard replay.
 
     `is_reply` counts when this incoming message is itself a native Twitch reply
@@ -111,7 +115,8 @@ def record(db, user_id, login, stream_id, timestamp=None, message_id=None, text=
             if cur.rowcount != 1:
                 return False
         native = int(bool(is_reply))
-        _upsert(db, user_id, login, stream_id, when, messages=1, words=_words(text), replies=native, native_replies=native)
+        words,characters=content_counts(text,login,reply_login)
+        _upsert(db, user_id, login, stream_id, when, messages=1, words=words,characters=characters,replies=native, native_replies=native)
     return True
 
 
