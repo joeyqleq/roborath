@@ -128,6 +128,26 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PermissionError):await self.adapter.reply('must not send','beforeoff')
         self.assertTrue(self.bot.access.can_receive(OWNER,'!ask hello',True))
 
+    async def test_owner_status_and_access_reports_work_while_muted(self):
+        self.bot.access.invokes.apply(OWNER,'globaloff',[],'global_off',None,'stream-one')
+        self.bot.access.set_mute(OWNER,'silence',True)
+        await self.bot.on_chat(self.event('status','!rr status',OWNER))
+        self.assertIn('MUTED',self.frames[-1])
+        self.adapter.last_send=-1e6
+        await self.bot.on_chat(self.event('accessreport','!ask who is currently allowed to use you?',OWNER))
+        self.assertIn('Owner always allowed',self.frames[-1])
+        before=len(self.frames)
+        await self.bot.on_chat(self.event('fakeaccess','!rr status'))
+        self.assertEqual(len(self.frames),before)
+
+    async def test_owner_taught_notes_are_scoped_context_and_can_be_removed(self):
+        await self.bot.on_chat(self.event('teach','!rr remember music => System of a Down is our favourite',OWNER))
+        self.assertIn('System of a Down',self.bot.shared_chat_context('stream-one','music','new'))
+        self.assertNotIn('System of a Down',self.bot.shared_chat_context('another','astronomy','new'))
+        self.adapter.last_send=-1e6
+        await self.bot.on_chat(self.event('unteach','!rr forget music',OWNER))
+        self.assertEqual(self.bot.db.execute('SELECT COUNT(*) FROM rr_owner_notes').fetchone()[0],0)
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER

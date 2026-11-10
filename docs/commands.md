@@ -116,3 +116,13 @@ Verified owner may use these directly or after `!ask`:
 - `global turn off` / `remove everyone`: block all non-owner invocations, including previously granted testers. Owner administration remains available. `stop talking` is the separate full silence command.
 
 Numbered limits cover conversation, search, fact and research together; help and controls do not spend them. Backend failures return reserved allowance. Numbers apply to the current stream; access persists afterward with normal per-feature limits (conversation has its normal cooldown). Owner and streamer are exempt from numeric quotas, but explicit/global access denial still blocks the streamer. Global off must be reversed with global allow. All target usernames resolve through Twitch before any member of a bulk grant changes. Unrecognized permission requests return a deterministic error instead of passing to the model.
+
+## Status, access reports and taught context
+
+- `!rr status` or `!ask status`: compact state, active stream, model and shared invoke usage. Owner only.
+- `show access`, `!rr access status`, or `!ask who is currently allowed to use you?`: paginated access report. `show access 2` selects page 2.
+- Global off always excludes Joeyleq. While `stop talking` suppresses ordinary replies, owner status/access reports and resume remain available.
+- `!rr remember music => Our favourite band is System of a Down`: save owner-taught topic context for up to 30 days. `!rr forget music` deletes it. These are preferences/context, not verified evidence or permission changes. The exact topic word selects notes for later conversation; no model weights change.
+- `!ask latest Israel news`: fetch recent BBC/Al Jazeera RSS summaries on demand, cached for five minutes, limited to reports published in the last 48 hours. Reply attributes publisher/date and links a report. RSS is publisher reporting, not independent confirmation; this does not guarantee complete breaking-news coverage or full-article access.
+
+The specialist relay now requests a compact final body with one fact source or up to two research sources. The Twitch gateway formats, shortens and clips; there is no second model summarizing the specialist reply.
