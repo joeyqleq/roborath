@@ -14,6 +14,8 @@ For either route, the output must distinguish reportable interest, insufficient 
 
 ## Approximate keyword volume
 
+The Google Ads API itself has no usage charge; Cloud billing is optional for API setup, with quotas still applying. A paid third-party provider is not required. Source: [official Cloud/OAuth setup](https://developers.google.com/google-ads/api/docs/oauth/cloud-project). The recommended no-provider-fee route for this owner is official Keyword Planner API approval plus OAuth, not a paid Trends reseller. This does not change the data's approximate monthly granularity or make a missing keyword a verified zero.
+
 Google Ads Keyword Planner historical metrics provide approximate monthly volumes and keyword ideas with geographic targeting. This differs from an exact count over arbitrary 60-day boundaries. Close variants may be combined; missing small keywords do not prove zero searches.
 
 Current official onboarding has changed: developer tokens were sunset on September 9, 2026. Use a Google Cloud project with Google Ads API enabled, OAuth credentials and authorized access to the relevant Google Ads customer account. Apply for **Basic or Standard API access** through Cloud Console for keyword planning; Explorer access excludes `KeywordPlanIdeaService`. Basic/Standard applications require the documented brand verification. Some older Google pages still describe developer tokens; follow the current access-policy page.

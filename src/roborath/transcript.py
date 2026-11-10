@@ -509,7 +509,7 @@ class TranscriptStore:
 
     def activity_question(self,stream_id,question,now=None):
         """Exact retained-chat statistics, never viewer join/watch-time inference."""
-        value=str(question).strip()
+        value=re.sub(r'\bhow+\b','how',str(question).strip().replace('\u200b',''),flags=re.I)
         if re.search(r'\b(?:leaderboard|who (?:here )?has (?:spoken|talked|typed|written|said) the most|most (?:talkative|active)|top (?:chatters|speakers))\b',value,re.I):
             from text_metrics import content_counts
             users={}
@@ -520,12 +520,18 @@ class TranscriptStore:
             metric='characters' if re.search(r'\b(?:characters|chars)\b',value,re.I) else 'messages' if re.search(r'\bmessages\b',value,re.I) else 'words'
             top=sorted(users.values(),key=lambda x:(-x[metric],x['name']))[:4]
             return ('Captured chat top by '+metric+': '+ ' | '.join(str(i)+'. @'+x['name']+' '+str(x[metric]) for i,x in enumerate(top,1)) if top else 'No retained chat available for a leaderboard.')+'; this stream, received messages only.'
-        if not re.search(r'\b(?:how many (?:words|characters|chars|messages|replies)|what time|when did|how long|first message|first spoke)\b',value,re.I):return None
+        if not re.search(r'\b(?:how many (?:words|characters|chars|messages|replies)|(?:word|character|message) counts?|number of (?:words|characters|messages)|what time|when did|how long|first message|first spoke)\b',value,re.I):return None
         named=re.search(r'\b(?:user|viewer)\s+@?([a-z0-9_]{3,25})\b|@([a-z0-9_]{3,25})\b',value,re.I)
         if not named:
-            named=re.search(r'\b(?:did|has)\s+@?([a-z0-9_]{3,25})\s+(?:say|send|write|speak|been|come|join|start|first)',value,re.I)
-        if not named:return None
-        login=next(x for x in named.groups() if x).lower()
+            named=re.search(r'\b(?:did|has|have)\s+@?([a-z0-9_]{3,25})\s+(?:say|said|send|sent|write|written|speak|spoken|typed|been|come|join|start|first)',value,re.I)
+        if named:login=next(x for x in named.groups() if x).lower()
+        else:
+            # Resolve exact observed login tokens for looser phrasing such as
+            # "word count for SAEEDMSR"; never guess a display-name identity.
+            tokens=set(re.findall(r'[a-z0-9_]{3,25}',value.lower()))
+            matches=[r[0] for r in self.db.execute('SELECT DISTINCT login FROM transcript_messages WHERE stream_id=?',(stream_id,)) if r[0] in tokens]
+            if len(matches)!=1:return 'Which Twitch username should I count? I can query retained chat; include the exact login.'
+            login=matches[0]
         identity=self.db.execute('SELECT twitch_user_id FROM transcript_messages WHERE stream_id=? AND login=? ORDER BY created_utc DESC LIMIT 1',(stream_id,login)).fetchone()
         if not identity:return '@'+login+': no retained messages captured in this stream. Joining/watching time is not recorded.'
         uid=identity[0]
@@ -537,6 +543,15 @@ class TranscriptStore:
         words=sum(r[0] for r in counts);chars=sum(r[1] for r in counts)
         stamp=first.strftime('%H:%M UTC')
         text=f'@{login}: {len(rows)} captured messages, {words} words, {chars} characters (no spaces/usernames); first spoke {stamp}, {minutes//60}h {minutes%60}m ago. '
+        if re.search(r'\brank\b',value,re.I):
+            metric='characters' if re.search(r'\b(?:characters|chars)\b',value,re.I) else 'messages' if re.search(r'\bmessages\b',value,re.I) else 'words'
+            totals={}
+            for other,who,body,reply in self.db.execute("SELECT twitch_user_id,login,text,reply_login FROM transcript_messages WHERE stream_id=? AND twitch_user_id!='1591621882'",(stream_id,)):
+                w,ch=content_counts(body,who,reply)
+                totals[other]=totals.get(other,0)+(ch if metric=='characters' else 1 if metric=='messages' else w)
+            score=chars if metric=='characters' else len(rows) if metric=='messages' else words
+            rank=1+sum(v>score for v in totals.values())
+            text+=f'Rank #{rank} by {metric}. '
         if re.search(r'\b(?:come|join|entered)\b',value,re.I):text+='First captured speech, not join time. '
         text+='Retained chat only; missed/deleted messages excluded.'
         return text

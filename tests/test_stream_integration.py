@@ -201,6 +201,13 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('top by words',answer)
         self.assertNotIn('alice',self.bot.transcript.activity_question('other-stream','leaderboard'))
 
+    async def test_real_typo_and_said_word_count_query_does_not_fall_through_to_model(self):
+        self.bot.transcript.record('stream-one','said-first','123','saeedmsr','one two three')
+        await self.bot.on_chat(self.event('realwordquery',"!ask howw many words has SAEEDMSR said so far since the beginning of the stream? what's his rank?",OWNER))
+        self.assertIn('3 words',self.frames[-1])
+        self.assertIn('Rank #',self.frames[-1])
+        self.assertNotIn("don't have access",self.frames[-1])
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER
