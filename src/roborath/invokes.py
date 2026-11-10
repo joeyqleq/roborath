@@ -23,6 +23,8 @@ def parse(text: str) -> InvokeIntent | None:
     """Parse owner invoke controls; targets are Twitch logins or '*' sentinel."""
     value = PREFIX.sub("", str(text).strip(), count=1).strip().casefold().rstrip(".!?")
     value=re.sub(r'^please\s+|\s+please$','',value).strip()
+    value=re.sub(r'\b(?:invoke|invocation|command|ai)\s+(permissions?|access)\b',r'\1',value)
+    value=re.sub(r'\b(?:all|every)\s+(?:usernames|chatters|viewers|people)\b','everyone',value)
     value=re.sub(r'\b(?:user|username)\s+(?=@?[a-z][a-z0-9_]{2,24}\b)','',value)
     # Natural owner phrasing: a gift means more uses, never a pretend LLM action.
     natural=re.fullmatch(rf'(?:give|grant)\s+(?:(\d+)\s+(?:more\s+)?(?:invokes?|invocations?|uses?)\s+to\s+|(?:permissions?|access)\s+to\s+|to\s+){_TARGETS}',value)

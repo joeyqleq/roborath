@@ -121,6 +121,14 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.bot.access.invokes.access(VIEWER))
         self.assertIn('unchanged',self.frames[-1])
 
+    async def test_actual_natural_global_grant_creates_allowance_without_model(self):
+        await self.bot.on_chat(self.event('naturalglobal','!ask give invoke permissions to all',OWNER))
+        self.assertTrue(self.bot.access.can_receive(VIEWER,'!ask hello',True))
+        self.assertEqual(self.bot.access.invokes.limit(VIEWER,'stream-one'),2)
+        await self.bot.on_chat(self.event('naturalglobal','!ask give invoke permissions to all',OWNER))
+        self.assertEqual(self.bot.access.invokes.limit(VIEWER,'stream-one'),2)
+        self.assertTrue(any('2 extra invokes' in f for f in self.frames))
+
     async def test_global_off_blocks_pending_viewer_send(self):
         self.bot.access.invokes.apply(OWNER,'open',['*'],'allow',None,'stream-one')
         await self.bot.on_chat(self.event('beforeoff','!rr help'))

@@ -29,6 +29,11 @@ class InvokeParserTests(unittest.TestCase):
             ('give alice and bob permissions',('alice','bob'))]:
             intent=parse(raw)
             self.assertEqual((intent.action,intent.targets,intent.amount),('add',targets,2))
+        for modifier in ('invoke','invocation','command','AI'):
+            for target in ('all','everyone','all users','all viewers','every username'):
+                intent=parse('!ask give '+modifier+' permissions to '+target)
+                self.assertIsNotNone(intent)
+                self.assertEqual((intent.action,intent.targets,intent.amount),('add',('*',),2))
         intent=parse('give alice 4 invokes')
         self.assertEqual((intent.action,intent.amount),('add',4))
 
