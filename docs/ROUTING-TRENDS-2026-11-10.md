@@ -1,5 +1,7 @@
 # Routing measurements and Google Trends integration boundary
 
+Live checkpoint: runtime `d912919` deployed on ORA3 at 2026-11-10 03:51 UTC; active/running, zero systemd restarts. Backup `/var/lib/roborath/backups/ask-routing-20261110T035101Z`. CI run 42752027113 passed on both Python 3.13 and 3.14; local full suite 212 passed and final route/integration checks 28 passed. Installed pipeline-classifier flag is false. Database leaderboard and SaeedMSR content-stat queries were verified privately without posting synthetic Twitch messages. The three-stream theme remains on stream 1/3; the repaired two-invoke global grant persists. Mem0 writes were unavailable due reauthentication; this file is the durable checkpoint. Trends integration awaits authorized provider access and remains unconfigured. Original handoff's broader crawler/source-verification acceptance is still incomplete.
+
 Installed model inventories were checked on ORA1, ORA3, ORA5, ORA6, ORA7 and ORA8. The user's specialized model is `tev1:0.8b` on ORA8, with decision capability. It uses Ollama `/v1/systemone`, not the ordinary generate/chat API. No new model was downloaded.
 
 Qwen3.5 2B cold calls on ORA3/ORA5 took about 6.15/5.83 seconds. Warm constrained-output trials took roughly 1.29–2.09 seconds and misclassified three simple route examples. These small diagnostic runs are not an accuracy benchmark.
