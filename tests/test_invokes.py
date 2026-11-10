@@ -6,11 +6,11 @@ from invokes import InvokeStore, parse
 class InvokeParserTests(unittest.TestCase):
     def test_allowance_phrasings_and_wrappers(self):
         cases = {
-            "allow joey": ("allow", ("joey",), None),
-            "!ask give @alice 3 invokes": ("set", ("alice",), 3),
-            "!rr ask allow alice and bob to invoke your commands": ("allow", ("alice", "bob"), None),
-            "grant everyone 2 invokes": ("set", ("*",), 2),
-            "global allow": ("global_allow", (), None),
+            "allow joey": ("add", ("joey",), 2),
+            "!ask give @alice 3 invokes": ("add", ("alice",), 3),
+            "!rr ask allow alice and bob to invoke your commands": ("add", ("alice", "bob"), 2),
+            "grant everyone 2 invokes": ("add", ("*",), 2),
+            "global allow": ("add", ('*',), 2),
             "global turn off": ("global_off", (), None),
             "take away @alice access": ("deny", ("alice",), None),
         }
@@ -19,6 +19,18 @@ class InvokeParserTests(unittest.TestCase):
                 intent = parse(raw)
                 self.assertIsNotNone(intent)
                 self.assertEqual((intent.action, intent.targets, intent.amount), expected)
+
+    def test_natural_permissions_default_two_and_give_tops_up(self):
+        for raw,targets in [
+            ('ask, give permissions to everyone',('*',)),
+            ('!ask global allow all users to invoke commands',('*',)),
+            ('give to Saeedmsr',('saeedmsr',)),
+            ('give permissions to user Saeedmsr',('saeedmsr',)),
+            ('give alice and bob permissions',('alice','bob'))]:
+            intent=parse(raw)
+            self.assertEqual((intent.action,intent.targets,intent.amount),('add',targets,2))
+        intent=parse('give alice 4 invokes')
+        self.assertEqual((intent.action,intent.amount),('add',4))
 
     def test_ambiguous_or_unsafe_phrases_are_not_controls(self):
         for raw in ("allow me to tell you a story", "how many invokes do I have?", "everyone can invoke commands"):
@@ -87,6 +99,17 @@ class InvokeStoreTests(unittest.TestCase):
         self.assertTrue(self.store.reserve("456", "a", "stream-A"))
         self.store.forget("456")
         self.assertEqual(self.store.status("stream-A")["usage"], [])
+
+    def test_global_gift_reopens_and_repeated_gift_extends_remaining(self):
+        self.apply('off',(),'global_off')
+        intent=parse('give permissions to everyone')
+        self.apply('everyone',intent.targets,intent.action,intent.amount)
+        self.assertTrue(self.store.reserve('456','used','stream-A'))
+        self.assertEqual(self.store.limit('456','stream-A'),2)
+        intent=parse('give to alice')
+        self.apply('alice',('456',),intent.action,intent.amount)
+        self.assertEqual(self.store.limit('456','stream-A'),4)
+        self.assertTrue(self.store.reserve('456','again','stream-A'))
 
 
 if __name__ == "__main__":

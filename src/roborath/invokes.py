@@ -7,7 +7,7 @@ import sqlite3
 from typing import Iterable
 
 OWNER_TWITCH_ID = "1414798445"
-PREFIX = re.compile(r"^(?:!ask\s+|!rr\s+ask\s+)", re.I)
+PREFIX = re.compile(r"^(?:!?ask\s*[,!:]?\s+|!rr\s+(?:ask\s+)?|(?:hey\s+)?@?roborath\s*[,!:]?\s+)", re.I)
 _USER = r"@?[a-z][a-z0-9_]{2,24}"
 _TARGETS = rf"({_USER}(?:\s*(?:,|and)\s*{_USER})*|every username|everyone|everybody|all(?:\s+users)?|global)"
 
@@ -22,9 +22,20 @@ class InvokeIntent:
 def parse(text: str) -> InvokeIntent | None:
     """Parse owner invoke controls; targets are Twitch logins or '*' sentinel."""
     value = PREFIX.sub("", str(text).strip(), count=1).strip().casefold().rstrip(".!?")
+    value=re.sub(r'^please\s+|\s+please$','',value).strip()
+    value=re.sub(r'\b(?:user|username)\s+(?=@?[a-z][a-z0-9_]{2,24}\b)','',value)
+    # Natural owner phrasing: a gift means more uses, never a pretend LLM action.
+    natural=re.fullmatch(rf'(?:give|grant)\s+(?:(\d+)\s+(?:more\s+)?(?:invokes?|invocations?|uses?)\s+to\s+|(?:permissions?|access)\s+to\s+|to\s+){_TARGETS}',value)
+    if natural:return InvokeIntent('add',_parse_targets(natural[2]),int(natural[1] or 2))
+    natural=re.fullmatch(rf'(?:give|grant)\s+{_TARGETS}(?:\s+(?:(\d+)\s+(?:more\s+)?(?:invokes?|invocations?|uses?)|(?:permissions?|access)))?',value)
+    if natural:return InvokeIntent('add',_parse_targets(natural[1]),int(natural[2] or 2))
+    natural=re.fullmatch(rf'(?:global\s+)?allow\s+{_TARGETS}(?:\s+to\s+(?:invoke|use)\s+(?:your\s+)?commands)?',value)
+    if natural:return InvokeIntent('add',_parse_targets(natural[1]),2)
     match = re.fullmatch(r"global\s+(allow|turn\s+off|off|disable)", value)
     if match:
-        return InvokeIntent("global_allow" if match[1] == "allow" else "global_off")
+        return InvokeIntent('add',('*',),2) if match[1]=='allow' else InvokeIntent('global_off')
+    match=re.fullmatch(rf'set\s+{_TARGETS}\s+(?:to\s+)?(\d+)\s+invokes?',value)
+    if match:return InvokeIntent('set',_parse_targets(match[1]),int(match[2]))
     match = re.fullmatch(rf"(?:allow|grant)\s+{_TARGETS}\s+(\d+)\s+invokes?", value)
     if match:
         return InvokeIntent("set", _parse_targets(match[1]), int(match[2]))
@@ -39,7 +50,7 @@ def parse(text: str) -> InvokeIntent | None:
         return InvokeIntent("subtract", _parse_targets(match[2]), int(match[1]))
     match = re.fullmatch(rf"(?:allow|grant|give)\s+{_TARGETS}(?:\s+(?:to\s+)?(?:invoke\s+your\s+commands|all\s+ai|access))?", value)
     if match:
-        return InvokeIntent("allow", _parse_targets(match[1]))
+        return InvokeIntent("add", _parse_targets(match[1]),2)
     match = re.fullmatch(rf"(?:remove|revoke|block|deny|take\s+away)\s+{_TARGETS}(?:\s+(?:access|invoke\s+access))?", value)
     if match:
         targets = _parse_targets(match[1])
@@ -129,6 +140,9 @@ class InvokeStore:
                 if action == "global_allow":
                     self.db.execute("INSERT INTO rr_invoke_rules(user_id,allowed,limit_count,updated_by) VALUES('*',1,-1,?) ON CONFLICT(user_id) DO UPDATE SET allowed=1,limit_count=-1,updated_by=excluded.updated_by", (str(actor_id),))
             else:
+                # A fresh global allowance explicitly reopens the non-owner gate.
+                if target_list==('*',) and action in ('set','add','allow'):
+                    self.db.execute('UPDATE rr_invoke_global SET enabled=1,updated_by=? WHERE singleton=1',(str(actor_id),))
                 for target in target_list:
                     prior = self.db.execute("SELECT limit_count FROM rr_invoke_limits WHERE user_id=? AND stream_id=?", (target,str(stream_id))).fetchone()
                     if prior is None and target != "*":
