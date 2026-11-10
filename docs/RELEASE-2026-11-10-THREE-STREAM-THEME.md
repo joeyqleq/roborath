@@ -1,0 +1,11 @@
+# Temporary Hegseth theme — live checkpoint
+
+Owner explicitly authorized a strong editorial theme and mild public topic injection for three streams including the current broadcast. Runtime `ce39c50` deployed and activated on verified live stream `318580860120` on 2026-11-10. Private backup: `/var/lib/roborath/backups/three-stream-theme-20261110T031019Z`.
+
+Exactly three distinct verified stream IDs are eligible. Reconnect/restart does not spend another stream or repeat a post. At most three hand-written comments per stream, at least 45 minutes apart, with a 14-day safety expiry. Mute, global-off, offline and explicit theme-off are checked at the outbound boundary. This scoped public-post authorization does not enable general public invocation or unrelated timers. Owner commands: `!rr theme status`, `!rr theme off`.
+
+The first successful socket send was recorded in the public transcript at 03:10:40 UTC: “Hegseth gets the spotlight; Trump's war machine deserves the whole damn floodlight. Accountability shouldn't stop at the most disposable suit.” Socket-send success does not independently establish Twitch client display. Theme state shows current stream position 0 and one reserved/sent post. No repeated activation should be performed, as that resets the campaign.
+
+Current reporting found through AP and Massie's House press announcement supports a renewed impeachment push on November 9, not a completed House impeachment or removal. Relevant model context preserves that distinction and marks scapegoating as interpretation. Stream video/audio is not accessible. Future developments require refreshed reporting. References: https://apnews.com/article/f5303cfb626ae2ef7a4a3f660f5519df and https://massie.house.gov/news/email/show.aspx?ID=S4GTPSKFBP6BS5DGBRY7B4KBV4 .
+
+Verification: full suite passed 200 tests before the final additional send-boundary test; 25 focused theme/integration tests then passed. CI run 42747631892 passed on Python 3.13 and 3.14 for deployed runtime, including the added test. Mem0 write was unavailable due reauthentication; this file is the durable campaign checkpoint. Original handoff's unfinished source-validation/crawler work remains recorded separately.
