@@ -1,5 +1,7 @@
 import unittest
 from help_text import PAGES, TOPICS, help_response
+from access_control import requested_capability
+from irc_adapter import sanitize_public_reply
 
 
 class HelpTextTests(unittest.TestCase):
@@ -27,6 +29,15 @@ class HelpTextTests(unittest.TestCase):
         result = help_response("!rr help 9")
         self.assertIn("1, 2, 3 or 4", result)
         self.assertNotRegex(result, r"[<>{}]")
+
+    def test_all_help_fits_wire_budget_including_maximum_username_and_owner_title(self):
+        for text in [*PAGES.values(),*TOPICS.values(),help_response('!rr help',specialist_enabled=False)]:
+            wire='@'+'u'*25+' Boss, '+sanitize_public_reply(text)
+            self.assertLessEqual(len(wire.encode()),420)
+            self.assertNotIn('\n',wire)
+            self.assertNotIn('<question>',wire)
+        for topic in TOPICS:
+            self.assertEqual(requested_capability('!rr help '+topic),'help',topic)
 
 
 if __name__ == "__main__":

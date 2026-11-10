@@ -5,25 +5,32 @@ import re
 
 
 PAGES = {
-    1: "Ask: !ask tell me a joke. Search: !search latest space news. Quick claim check: !verify the Earth orbits the Sun. For a careful explanation: !verify deep why do seasons happen?",
-    2: "Mario: !rr mario status, on, off, reset, roster, next, scores or leaderboard. Report a first-place finish with !rr win joey. Two matching voters confirm it. Ask !rr help mario for details.",
-    3: "Reminders: !rr remind 20m stretch your legs. Watch: !rr watch phone => knock knock. Privacy: !privacy, !forgetme or !optout; return with !optin. Ask !rr help alerts for alerts and reminders.",
-    4: "Owner controls: allow @viewer to fact check; give @viewer conversation or all AI; remove @viewer from testing; show access; stop talking; resume talking. Only verified owner joeyleq can manage access or silence. !rr id shows your Twitch ID.",
+    1: "Help 1/4 | Use !ask for everything: !ask latest Israel news; !ask verify this quote; !ask research the competing sources; !ask tell me a joke. Topics: !rr help stats, permissions or status. Next: !rr help 2.",
+    2: "Help 2/4 | Mario: !rr mario status, on, off, reset, roster, next, scores or leaderboard. Report a first-place finish with !rr win joey. Two matching voters confirm it. Topic: !rr help mario. Next: !rr help 3.",
+    3: "Help 3/4 | Stats: !ask how many words did user alice say? !ask leaderboard by characters. Reminders: !rr remind 20m stretch. Privacy: !privacy; !optout deletes your data; !optin resumes capture. Topics: !rr help memory or alerts. Next: !rr help 4.",
+    4: "Help 4/4 | Owner English: give invoke permissions to all = two more each this stream; give to alice = two more; give alice 3 invokes = three more. Global turn off excludes Joeyleq. Show access; !rr status. Stop talking; resume talking. Topic: !rr help admin.",
 }
 
 TOPICS = {
-    "ask": "Ask: !ask tell me a joke about billionaires. Follow up with !ask and your next question. RoboRath ignores ordinary unaddressed chat.",
+    "ask": "!ask chooses the pipeline: conversation, exact chat statistics, news, verification or research. Examples: !ask latest Israel news; !ask verify this quote; !ask research competing sources. Follow up with !ask. Permissions and invoke limits still apply.",
     "search": "Search: !search latest NASA moon news. Results are discovery, not proof; ask !verify for a sourced claim check. Current facts may be unavailable.",
     "verify": "Verify: !verify the Earth orbits the Sun. For explanations or disputed history use !verify deep how did the Six-Day War begin? Deep requests use the research allowance.",
-    "fact": "Quick check: !fact the Earth is flat, or !check this quote is real. One claim, short verdict and source when verified. One use per stream by default.",
-    "research": "Research: !research history of Maoism. For a short claim check use !verify. Research gives more context and sources; one use per UTC day by default.",
+    "fact": "Use !ask verify this quote for a sourced check. Old !fact, !check and !verify aliases still work. Shared invokes apply when granted; legacy fact access has one use per stream. Failed requests refund allowance.",
+    "research": "Use !ask research the competing sources for deeper investigation. !research still works. Shared invokes apply when granted; legacy research access has one use per UTC day. Source availability and spending limits still apply.",
     "mario": "Mario: !rr mario status|on|off|reset|roster|next|scores|leaderboard. Report a win with !rr win joey or ?! joey. Two distinct matching reports confirm first place.",
     "alerts": "Text alerts: !rr watch phone => knock knock. Watches expire after 12h and cool down for 5m. !rr help reminders explains timed reminders.",
     "triggers": "Owner rules: !rr rule add phone when phone => knock knock. Use !rr rule list, test phone phone, disable phone, enable phone or remove phone. Natural: Whenever you hear the word phone, say knock knock. Text matching, not semantic inference.",
     "reminders": "Queue: !rr remind 20m drink water. List: !rr reminders. Cancel: !rr reminder cancel 1. Delay: 1m to 7d, five outstanding per user. Delivery waits for verified live public mode and respects silence.",
     "privacy": "!privacy explains retention. !forgetme or !optout deletes your stored chat data and opts out; !optin resumes interaction. Only public chat is seen; no whispers or stream video.",
-    "permissions": "Owner joeyleq alone grants or removes QA access and controls silence. The streamer can use AI without quotas when public use is enabled, but cannot administer permissions. Ask !rr help admin.",
+    "permissions": "Joeyleq only: give permissions to everyone; give invoke permissions to all; give to alice. Each gives two more shared invokes this stream. Give alice 3 invokes gives three more. Remove alice revokes access; global turn off blocks viewers, never Joeyleq. Show access lists permissions.",
     "admin": "Owner: show access; !rr status. Give permissions to everyone = two invokes each. Give to alice = two more. Give alice 3 invokes = three more. Set alice to 3 invokes = total cap. Remove alice; global turn off. Owner always allowed. No command prefix required for owner controls.",
+    "status": "Owner: !rr status shows state, stream, model and invoke usage. Show access lists allowed/denied users; show access 2 gets page 2. These reports and resume talking remain available during silence. Global turn off always excludes Joeyleq.",
+    "stats": "!ask how many words did user alice say? !ask how many characters did user alice write? !ask when did user alice first speak? Counts exclude username mentions; characters exclude whitespace. First speech is not join/watch time. Captured chat only.",
+    "leaderboard": "!ask who here has spoken the most? ranks by words. !ask leaderboard by messages or !ask leaderboard by characters selects other rankings. Up to four chatters; current stream, retained received chat. RoboRath is excluded.",
+    "memory": "Received public chat is saved for 30 days, independent of browser refreshes. !ask what did user alice say three hours ago? Missing/disconnected or deleted messages cannot be recovered. Owner notes: !rr remember music => Our favourite band is System of a Down; !rr forget music.",
+    "news": "!ask latest Israel news retrieves dated publisher summaries with a source. !ask latest world news also works. Coverage may be incomplete; no matching recent report means unavailable, not no event. RSS summaries are publisher reports, not independent proof.",
+    "theme": "Owner: !rr theme status shows the temporary topic theme; !rr theme off stops it. The current Hegseth theme lasts three verified streams, including the activation stream. Comments are capped and respect mute/global-off.",
+    "trends": "Google Trends and keyword-volume data are not connected yet. RoboRath cannot currently confirm whether a username was searched in Israel. Missing Trends data does not prove zero searches. Owner setup requires authorized provider access.",
 }
 
 

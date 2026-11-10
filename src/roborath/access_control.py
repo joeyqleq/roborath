@@ -103,7 +103,7 @@ def requested_capability(raw: str) -> str | None:
         return "fact"
     if re.match(r'^(?:!research|!rr\s+research|@roborath\s+research|(?:hey\s+)?roborath\s*[:,!]\s*research)(?=\s|$)',text):
         return "research"
-    if re.fullmatch(r'!rr\s+(?:help(?:\s+(?:[1-4]|ask|search|verify|fact|research|mario|alerts|triggers|reminders|privacy|permissions|admin))?|commands(?:\s+[1-4])?)',text):return "help"
+    if re.fullmatch(r'!rr\s+(?:help(?:\s+(?:[1-4]|ask|search|verify|fact|research|mario|alerts|triggers|reminders|privacy|permissions|admin|status|stats|leaderboard|memory|news|theme|trends))?|commands(?:\s+[1-4])?)',text):return "help"
     if re.fullmatch(r'!(?:ask|search)\s*',text):return "conversation"
     if re.fullmatch(r'!(?:fact|check)\s*',text):return "fact"
     if re.fullmatch(r'!research\s*',text):return "research"
