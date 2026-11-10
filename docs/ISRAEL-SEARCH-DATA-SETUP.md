@@ -2,6 +2,8 @@
 
 Verified against provider documentation on 2026-11-10. No Google Trends, keyword-volume account or credentials are configured in RoboRath; the new help topic says so. Ordinary search/news retrieval is separate from Trends and Keyword Planner.
 
+Help release checkpoint: `81244ba` deployed to ORA3, active/running with zero restarts. All four pages and nineteen topics were checked in the installed runtime; worst-case text including maximum username and owner title is 317 bytes. All topic routes are recognized as help permissions. Local full suite 214 passed and CI run 42755728761 passed on Python 3.13 and 3.14. Backup `/var/lib/roborath/backups/help-20261110T042515Z`. Google data access remains unconfigured; next action depends on the owner's chosen provider and securely provisioned account access. Mem0 connection still requires reauthentication; this is the durable checkpoint.
+
 ## Trends: time-series search interest
 
 The quickest low-friction trial is an authorized third-party Trends provider. SerpApi's current Free plan lists 250 searches/month and 50/hour. It requires a SerpApi API key. An Israel request would use country `IL`, the literal keyword and explicit start/end dates; timeline and subregion requests may consume separate queries. Those responses are relative interest, not exact search counts. Do not enable automatic paid renewals for this trial. A key alone does not connect RoboRath: the adapter still needs implementation and live quota/response validation once access is supplied securely.
