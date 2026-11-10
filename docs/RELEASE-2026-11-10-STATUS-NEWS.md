@@ -1,0 +1,15 @@
+# Live release checkpoint — status and news
+
+Runtime release `b6236a9` deployed to ORA3 on 2026-11-10 at 03:04 UTC with owner authorization. This supersedes older source-only/not-deployed statements for features included in this revision. Backup: `/var/lib/roborath/backups/status-news-20261110T030451Z`. Prior runtime and SQLite online backup are private on ORA3.
+
+Verification: 197 local tests pass; GitHub Actions run 42747023362 passed on Python 3.13 and 3.14. The service is active/running with zero systemd restarts after release. Twitch stream 318580860120 was verified live; transcript capture continued (329 retained rows at final observation). Owner-only QA plus explicitly granted testers remains configured; no global-allow command was issued by this release.
+
+Owner status and access reports work while ordinary replies are muted. Global access off always excludes Joeyleq. New controls: `!rr status`, `show access`, `show access 2`, `!rr remember music => Our favourite band is System of a Down`, `!rr forget music`. Notes expire after 30 days and are topic-selected unverified context; model weights do not change.
+
+Deployed news retrieval reads fixed BBC/Al Jazeera RSS feeds on demand with a five-minute cache, 48-hour freshness filter, bounded body/time limits and publisher attribution. One private synthetic request exercised the installed Bridge → publisher feeds → Nebius Hermes → formatting path, returned a dated Al Jazeera report and short source link, and ended `answered`. Delivery was intercepted privately; no synthetic Twitch post was made. Synthetic transcript/analytics rows were removed afterward. RSS summaries are not full articles, independent verification or comprehensive breaking-news coverage. No automatic news posting or paid news subscription was enabled.
+
+The relay audit inspected recent private-channel message lengths and metadata: newest final 377 characters, recent request 739; older requests roughly 1,400–2,000. No second summarizing model is invoked by the gateway. New specialist instructions request at most 240 characters of fact prose or 480 of research prose, plus source URLs and final marker. This prompt adjustment is deployed but has not yet been measured on a new live specialist reply. Gateway byte limits and final-output guards remain enforced.
+
+Political satire instructions now explicitly include the requested public figures and stronger adult language while retaining factual accuracy and separation between state policy and identity. A prompt cannot guarantee every joke or tone choice. Full-article research-source validation, authenticated crawler integration and broader conversation endurance evaluation remain unfinished from the original handoff.
+
+Mem0 recall/write was unavailable due reauthentication during this phase. This document is the durable checkpoint. The next useful acceptance step is a bounded owner-originated live status/access request and a source-supported research test, then inspection of actual reply behavior. Do not imply the original entire handoff is complete.
