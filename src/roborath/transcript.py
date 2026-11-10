@@ -510,6 +510,16 @@ class TranscriptStore:
     def activity_question(self,stream_id,question,now=None):
         """Exact retained-chat statistics, never viewer join/watch-time inference."""
         value=str(question).strip()
+        if re.search(r'\b(?:leaderboard|who (?:here )?has (?:spoken|talked|typed|written|said) the most|most (?:talkative|active)|top (?:chatters|speakers))\b',value,re.I):
+            from text_metrics import content_counts
+            users={}
+            for uid,login,text,reply in self.db.execute("SELECT twitch_user_id,login,text,reply_login FROM transcript_messages WHERE stream_id=? AND twitch_user_id!='1591621882' ORDER BY created_utc",(stream_id,)):
+                entry=users.setdefault(uid,{'name':login,'messages':0,'words':0,'characters':0})
+                words,chars=content_counts(text,login,reply)
+                entry['name']=login;entry['messages']+=1;entry['words']+=words;entry['characters']+=chars
+            metric='characters' if re.search(r'\b(?:characters|chars)\b',value,re.I) else 'messages' if re.search(r'\bmessages\b',value,re.I) else 'words'
+            top=sorted(users.values(),key=lambda x:(-x[metric],x['name']))[:4]
+            return ('Captured chat top by '+metric+': '+ ' | '.join(str(i)+'. @'+x['name']+' '+str(x[metric]) for i,x in enumerate(top,1)) if top else 'No retained chat available for a leaderboard.')+'; this stream, received messages only.'
         if not re.search(r'\b(?:how many (?:words|characters|chars|messages|replies)|what time|when did|how long|first message|first spoke)\b',value,re.I):return None
         named=re.search(r'\b(?:user|viewer)\s+@?([a-z0-9_]{3,25})\b|@([a-z0-9_]{3,25})\b',value,re.I)
         if not named:

@@ -17,7 +17,7 @@ from shortlinks import shorten_sources
 from mario import Mario
 from notifications import Notifications
 from router import Router, Ledger
-from decision import choose_quality
+from decision import fallback_quality,choose_route
 from web_lookup import lookup, needs_lookup
 from video_source import newest_video
 from scenarios import classify,history_context,repeated_count_correction,exact_letter_count,is_search_followup,resolve_search_query
@@ -708,6 +708,20 @@ class Bridge:
         search_match=re.fullmatch(r"!search\s+(.{2,700})",cmd,re.I)
         # Explicit specialist commands win over the generic addressed-chat form.
         parsed=parse_public(raw)
+        if chat_match and not parsed:
+            auto_question=chat_match.group(1)
+            # Local statistics and controls never need a model to route them.
+            if self.transcript.activity_question(stream,auto_question) or exact_answer(auto_question):
+                route='chat'
+            else:route=await choose_route(auto_question,self.http)
+            LOG.info('ask pipeline=%s',route)
+            if route in ('fact','research'):
+                strict=os.getenv('ROBORATH_OWNER_ONLY_TEST_MODE','false').lower()=='true'
+                if not self.access.can_receive(user,'!'+route+' '+auto_question,strict):
+                    await self.twitch_reply('Your access does not include source verification. Ask Joeyleq for permission.',mid)
+                    return
+                parsed=(route,auto_question)
+            elif route=='search':search_match=chat_match
         if parsed:
             chat_match=None
         # A verified operator can follow up without repeating !ask, but ONLY
@@ -817,8 +831,7 @@ class Bridge:
                             linked=await shorten_sources(sources,self.http,limit=2)
                             reply=sentence_clip(linked,budget=370)
                         else:
-                            quality=await choose_quality(question,self.http,
-                                enabled=os.getenv("ROBORATH_LOCAL_DECISION_ENABLED","false").lower()=="true")
+                            quality=fallback_quality(question)
                             if scenario.kind=="memory_followup":
                                 quality="strong"
                             role=("owner" if user==os.getenv("ROBORATH_OWNER_TWITCH_USER_ID") else

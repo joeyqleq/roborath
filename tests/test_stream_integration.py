@@ -172,6 +172,27 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.bot.transcript.delete_message('second-long-ago')
         self.assertIn('1 captured messages, 3 words',self.bot.transcript.activity_question('stream-one','how many words did viewerx say?'))
 
+    async def test_unified_ask_fact_runs_specialist_once(self):
+        os.environ['ROBORATH_FACT_RELAY_ENABLED']='true'
+        calls=[]
+        async def post(prompt):calls.append(prompt);return 'private-root'
+        async def answer(root):return 'Yes, confirmed with a source. https://is.gd/fixture'
+        async def shorten(text,http,limit=2):return text
+        self.bot.mm_post=post;self.bot.mm_answer=answer
+        with patch.object(bridge,'MM_TOKEN','fixture'),patch.object(bridge,'MM_CHANNEL','fixture'),patch.object(bridge,'shorten_sources',shorten):
+            await self.bot.on_chat(self.event('unifiedfact','!ask verify this historical claim',OWNER))
+        self.assertEqual(len(calls),1)
+        self.assertEqual(self.bot.db.execute('SELECT command,status FROM chat_events WHERE message_id=?',('unifiedfact',)).fetchone(),('fact','answered'))
+
+    async def test_word_leaderboard_uses_saved_content_without_model(self):
+        self.bot.transcript.record('stream-one','leader-one','123','alice','one two three four')
+        self.bot.transcript.record('stream-one','leader-two','456','bobby','@alice one two')
+        answer=self.bot.transcript.activity_question('stream-one','who here has spoken the most?')
+        self.assertIn('1. @alice 4',answer)
+        self.assertIn('2. @bobby 2',answer)
+        self.assertIn('top by words',answer)
+        self.assertNotIn('alice',self.bot.transcript.activity_question('other-stream','leaderboard'))
+
     async def test_intake_words_reply_counts_and_clean_private_export(self):
         event=self.event("public","hello fellow chat")
         event['reply_parent_user_id']=OWNER

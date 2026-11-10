@@ -131,4 +131,10 @@ The specialist relay now requests a compact final body with one fact source or u
 
 ## Natural owner wording — default two
 
+## One ask entry point and leaderboards
+
+Use `!ask` for ordinary conversation, statistics, current lookup, verification or deeper research. Clear requests route without a classifier: `!ask verify this quote`, `!ask research the competing sources`, `!ask latest Israel news`. Old `!fact`, `!research`, `!verify`, `!search` aliases remain compatible. Source-pipeline authorization, shared invoke accounting and spending limits still apply. Optional TEV1 classification for ambiguous requests is implemented but disabled pending a larger measured quality/latency advantage; the old Qwen quality-classifier call is no longer in the conversation path.
+
+Examples: `!ask who here has spoken the most?` ranks retained current-stream chat by words; `!ask leaderboard by characters` or `!ask leaderboard by messages` selects other counters. Results include up to four people, exclude RoboRath and obey opt-out/deletion. Rankings concern captured writers, not current viewers or watch time. Individual statistics include characters excluding whitespace and username mentions, total words/messages and first captured speech time.
+
 `give permissions to everyone`, `!ask global allow all users to invoke commands`, `ask, give permissions to everyone`, `give permissions to saeedmsr`, `give to saeedmsr`, and `give alice and bob permissions` are supported. No prefix is required for verified owner access controls. An unnumbered grant gives **two additional** shared invokes per person in the current stream. `give alice 3 invokes` gives three more; repeating a gift tops up the allowance. `set alice to 3 invokes` explicitly sets the total cap, including uses already spent. `add` remains a compatibility alias but is not required. Exact Twitch login resolution is required; display-name guesses are never used. A single username that fails lookup leaves the entire bulk grant unchanged.
