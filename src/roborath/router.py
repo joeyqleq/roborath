@@ -14,11 +14,14 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
-from prompts import CONVERSATION, MARIO, RESEARCH, ADMIN
+from prompts import CONVERSATION, MARIO, RESEARCH, ADMIN, OWNER_VOICE
+from policy import OWNER_TWITCH_ID
+from formatting import UnsafeModelOutput, validate_final_output
 LOG=logging.getLogger("roborath.router")
 
 # Published approximate Nebius list prices, USD/1M input and output tokens.
@@ -96,7 +99,11 @@ class Response:
     output_tokens: int
 
 class Ledger:
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, daily_cap=1.0, stream_cap=0.25):
+        self.daily_cap=float(daily_cap)
+        self.stream_cap=float(stream_cap)
+        if not (0 < self.daily_cap <= 100 and 0 < self.stream_cap <= 100):
+            raise ValueError("invalid dollar ceiling")
         self.db=sqlite3.connect(filename,timeout=20,isolation_level=None)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("""CREATE TABLE IF NOT EXISTS spend (
@@ -104,6 +111,10 @@ class Ledger:
           window TEXT NOT NULL, reserved_usd REAL NOT NULL,
           actual_usd REAL, status TEXT NOT NULL, created_utc TEXT NOT NULL)""")
         self.db.execute("CREATE INDEX IF NOT EXISTS spend_window ON spend(provider,window,status)")
+        columns={row[1] for row in self.db.execute("PRAGMA table_info(spend)")}
+        for name,kind in (("stream_id","TEXT"),("model","TEXT"),("input_tokens","INTEGER"),
+                ("output_tokens","INTEGER"),("latency_ms","INTEGER"),("outcome","TEXT")):
+            if name not in columns:self.db.execute("ALTER TABLE spend ADD COLUMN "+name+" "+kind)
 
     @staticmethod
     def window(provider: str, now=None) -> str:
@@ -116,7 +127,7 @@ class Ledger:
             CASE WHEN status='complete' THEN actual_usd ELSE reserved_usd END),0)
             FROM spend WHERE provider=? AND window=? AND status!='refunded'""",(provider,w)).fetchone()[0]
 
-    def reserve(self, request_id,provider,maximum):
+    def reserve(self, request_id,provider,maximum,stream_id=""):
         if provider not in BUDGET or not 0<maximum<=1.0:
             return False
         self.db.execute("BEGIN IMMEDIATE")
@@ -125,8 +136,14 @@ class Ledger:
             if total+maximum>BUDGET[provider]:
                 self.db.rollback()
                 return False
-            self.db.execute("INSERT INTO spend VALUES (?,?,?,?,?,?,?)",
-                (request_id,provider,self.window(provider),maximum,None,"reserved",dt.datetime.now(dt.timezone.utc).isoformat()))
+            today=dt.datetime.now(dt.timezone.utc).date().isoformat()
+            amount="CASE WHEN status='complete' THEN actual_usd ELSE reserved_usd END"
+            daily=self.db.execute("SELECT COALESCE(SUM("+amount+"),0) FROM spend WHERE created_utc>=? AND status!='refunded'",(today,)).fetchone()[0]
+            stream=self.db.execute("SELECT COALESCE(SUM("+amount+"),0) FROM spend WHERE stream_id=? AND status!='refunded'",(stream_id,)).fetchone()[0] if stream_id else 0
+            if daily+maximum>self.daily_cap or (stream_id and stream+maximum>self.stream_cap):
+                self.db.rollback();return False
+            self.db.execute("INSERT INTO spend(request_id,provider,window,reserved_usd,actual_usd,status,created_utc,stream_id) VALUES (?,?,?,?,?,?,?,?)",
+                (request_id,provider,self.window(provider),maximum,None,"reserved",dt.datetime.now(dt.timezone.utc).isoformat(),stream_id))
             self.db.commit()
             return True
         except Exception:
@@ -142,6 +159,11 @@ class Ledger:
         with self.db:
             self.db.execute("UPDATE spend SET status='refunded',actual_usd=0 WHERE request_id=? AND status='reserved'",(request_id,))
 
+    def record_usage(self,request_id,model,usage,latency_ms,outcome):
+        with self.db:
+            self.db.execute("UPDATE spend SET model=?,input_tokens=COALESCE(?,input_tokens),output_tokens=COALESCE(?,output_tokens),latency_ms=?,outcome=? WHERE request_id=?",
+                (model,usage.get("prompt_tokens"),usage.get("completion_tokens"),latency_ms,outcome,request_id))
+
 def estimate_usd(provider,model,prompt_chars,max_tokens):
     inp,out = PRICE.get(model,OTHER_PRICE_CEILING.get(provider,(3.,12.)))
     # Reserve for prompts and output using conservative chars/token estimation.
@@ -153,6 +175,7 @@ class Router:
         self.ledger=ledger
         self.http=client or httpx.AsyncClient(timeout=22,follow_redirects=False)
         self.available_models=available_models or {}
+        self._provider_failures: dict[str, tuple[int, float]] = {}
 
     def _get(self,provider):
         if str(self.env.get(provider+"_ENABLED", "true")).lower() in ("false","0","off","no"):
@@ -175,12 +198,26 @@ class Router:
             if not info:continue
             catalog=self.available_models.get(provider)
             if catalog is not None and model not in catalog:continue
+            failures,until=self._provider_failures.get(provider,(0,0.0))
+            if until>time.monotonic():
+                continue
             yield provider,model,info
+
+    def _provider_ok(self, provider):
+        self._provider_failures.pop(provider,None)
+
+    def _provider_failed(self, provider):
+        failures,until=self._provider_failures.get(provider,(0,0.0))
+        failures+=1
+        # A short in-process circuit breaker prevents repeatedly hitting a
+        # provider already returning errors. It resets automatically.
+        self._provider_failures[provider]=(failures,
+            time.monotonic()+30 if failures>=3 else until)
 
     async def complete(self,prompt:str,tier="chat",sources:str="",actor_id="",owner_id="",origin="twitch",
                        max_tokens:int=180,quality="fast",
                        actor_login:str="",actor_role:str="viewer",
-                       conversation_context:str="") -> Response:
+                       conversation_context:str="",stream_id:str="") -> Response:
         authorize(tier,actor_id,owner_id,origin)
         if len(prompt)>14000 or not prompt.strip():raise ValueError("prompt is empty or too long")
         conversation_context=conversation_context[:5200]
@@ -195,6 +232,11 @@ class Router:
             import re
             login=actor_login.lower() if re.fullmatch(r"[a-z0-9_]{3,25}",actor_login.lower()) else "unknown"
             role=actor_role if actor_role in ("viewer","owner","streamer") else "viewer"
+            if role=="owner" and actor_id!=OWNER_TWITCH_ID:
+                role="viewer"
+            if actor_id==OWNER_TWITCH_ID:
+                role="owner"
+                instruction+="\n"+OWNER_VOICE
             instruction+=(
                 "\nFor THIS message: the speaker is Twitch account @"+login+
                 " (verified role: "+role+"). You are RoboRath. "+
@@ -206,13 +248,19 @@ class Router:
         selections=list(self.candidates(tier))
         if tier=="chat" and quality=="strong":
             preferred=self._get("NEBIUS")
-            if preferred:
-                selections=[("NEBIUS","Qwen/Qwen3-235B-A22B-Instruct-2507",preferred)]+selections
-        for provider,model,(base,key) in selections:
+            strong_model=self.env.get("NEBIUS_STRONG_MODEL","")
+            catalog=self.available_models.get("NEBIUS")
+            failures,until=self._provider_failures.get("NEBIUS",(0,0))
+            if strong_model in PRICE and preferred and until<=time.monotonic() and (catalog is None or strong_model in catalog):
+                selections=[("NEBIUS",strong_model,preferred)]+selections
+        for provider,model,(base,key) in selections[:2]:
             request_id=uuid.uuid4().hex
-            estimated=estimate_usd(provider,model,len(prompt)+len(sources)+len(instruction)+len(conversation_context),max_tokens)
-            if not self.ledger.reserve(request_id,provider,estimated):
+            estimated=estimate_usd(provider,model,len((prompt+sources+instruction+conversation_context).encode('utf-8')),max_tokens)
+            if not self.ledger.reserve(request_id,provider,estimated,stream_id):
                 continue
+            started=time.monotonic()
+            response_received=False
+            spend_finalized=False
             try:
                 prompt_messages=[{"role":"system","content":instruction}]
                 if conversation_context:
@@ -228,20 +276,62 @@ class Router:
                   headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
                   json=body,timeout=28)
                 resp.raise_for_status()
+                response_received=True
                 data=resp.json()
-                answer=data["choices"][0]["message"]["content"]
-                if isinstance(answer,list):answer=" ".join(x.get("text","") for x in answer if isinstance(x,dict))
-                if not isinstance(answer,str) or not answer.strip():raise ValueError("empty model result")
+                if not isinstance(data,dict):
+                    raise ValueError("malformed provider response")
                 usage=data.get("usage") or {}
-                inp=int(usage.get("prompt_tokens") or int(len(prompt)/3))
-                out=int(usage.get("completion_tokens") or max_tokens)
+                if not isinstance(usage,dict):
+                    raise ValueError("malformed provider usage")
+                inp=_usage_count(usage.get("prompt_tokens"),int(len(prompt)/3))
+                out=_usage_count(usage.get("completion_tokens"),max_tokens)
                 in_rate,out_rate=PRICE.get(model,OTHER_PRICE_CEILING.get(provider,(3.,12.)))
                 cost=(inp*in_rate+out*out_rate)/1_000_000
+                # Once an inference response arrives it may be billable even
+                # when its payload is malformed or contains leaked tool data.
                 self.ledger.finish(request_id,cost if usage else estimated)
+                self.ledger.record_usage(request_id,model,usage,int((time.monotonic()-started)*1000),"received")
+                spend_finalized=True
+                choices=data.get("choices")
+                if not isinstance(choices,list) or len(choices)!=1 or not isinstance(choices[0],dict):
+                    raise ValueError("malformed provider choices")
+                choice=choices[0]
+                finish_reason=choice.get("finish_reason")
+                if finish_reason not in (None,"stop"):
+                    raise UnsafeModelOutput("provider returned a tool call without server execution")
+                message=choice.get("message")
+                if not isinstance(message,dict) or message.get("role")!="assistant":
+                    raise UnsafeModelOutput("provider did not return an assistant final message")
+                if message.get("tool_calls") or message.get("function_call"):
+                    raise UnsafeModelOutput("provider returned a tool call without server execution")
+                answer=validate_final_output(message.get("content"))
+                self.ledger.record_usage(request_id,model,usage,int((time.monotonic()-started)*1000),"completed")
+                self._provider_ok(provider)
                 LOG.info("model success provider=%s model=%s",provider,model)
-                return Response(answer.strip(),provider,model,cost,inp,out)
+                return Response(answer,provider,model,cost,inp,out)
             except (httpx.HTTPError,KeyError,ValueError,TypeError,IndexError) as exc:
-                self.ledger.refund(request_id)
+                # If a completed HTTP response was already accounted, leave its
+                # actual/estimated cost in the spend ledger. Refund only requests
+                # that failed before any response was received.
+                if not response_received and not isinstance(exc,(httpx.ReadTimeout,httpx.WriteTimeout)):
+                    self.ledger.refund(request_id)
+                else:
+                    if not spend_finalized:
+                        self.ledger.finish(request_id,estimated)
+                self._provider_failed(provider)
+                self.ledger.record_usage(request_id,model,{},int((time.monotonic()-started)*1000),type(exc).__name__)
                 last_error=type(exc).__name__
                 continue
         raise RuntimeError("no affordable available provider completed the request ("+str(last_error or "budget or config")+")")
+
+
+def _usage_count(value, fallback):
+    """Read provider-reported token counts without accepting negative values."""
+    if value is None:
+        return max(0,int(fallback))
+    if isinstance(value,bool):
+        raise ValueError("invalid provider token usage")
+    count=int(value)
+    if count<0:
+        raise ValueError("invalid provider token usage")
+    return count

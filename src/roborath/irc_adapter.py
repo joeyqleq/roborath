@@ -14,12 +14,17 @@ import os
 import re
 import time
 import unicodedata
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import httpx
 from websockets.asyncio.client import connect
 from bridge import Bridge, clean_request
 from access_control import requested_capability
 from twitch_auth import access_token
+from formatting import validate_final_output, utf8_clip
+from analytics import record_reply as analytics_record_reply, remove_user as analytics_remove_user
+from policy import OWNER_TWITCH_ID
 
 LOG = logging.getLogger("gt-twitch-irc")
 IRC_WS = "wss://irc-ws.chat.twitch.tv:443"
@@ -62,20 +67,27 @@ def parse_privmsg(line):
     login, channel, body = match.groups()
     mid = tags.get("id", "")
     uid = tags.get("user-id", "")
-    if not mid or not uid:
+    if not mid or not uid.isdigit():
         return None
+    created=None
+    stamp=tags.get("tmi-sent-ts","")
+    if stamp.isdigit():
+        try:created=datetime.fromtimestamp(int(stamp)/1000,timezone.utc).isoformat()
+        except (ValueError,OverflowError,OSError):pass
     return channel.lower(), {
         "message_id": mid,
         "chatter_user_id": uid,
         "chatter_user_login": login.lower(),
         "message": {"text": body},
         "room_id": tags.get("room-id", ""),
+        "created_utc": created,
+        "reply_parent_user_id": tags.get("reply-parent-user-id", ""),
     }
 
 
 def sanitize_public_reply(answer: str, login: str = "") -> str:
     """Strip model hype, duplicate speaker mentions, and decorative clutter."""
-    answer=re.sub(r"\s+", " ", str(answer or "")).strip()
+    answer=re.sub(r"\s+", " ", validate_final_output(answer)).strip()
     # Twitch's IRC chat is a public one-line plain-text surface.
     answer=re.sub(r"(?<!\S)#[A-Za-z][A-Za-z0-9_]*\b", "", answer)
     answer=re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", "", answer)
@@ -101,6 +113,10 @@ class IRCAdapter:
         self.room_id = ""
         self.stream_cache = ("", 0.0)
         self.token_checked_until = 0.0
+        self._unknown_session="uncertain-"+uuid4().hex
+        self._stream_lock=asyncio.Lock()
+        self._chat_tasks=set()
+        self._disconnect_at=None
         self.bridge.twitch_reply = self.reply
         self.bridge.stream_id = self.stream_id
         self.bridge.lookup_twitch_login = self.lookup_login
@@ -130,6 +146,10 @@ class IRCAdapter:
             return record.get("client_id", "")
 
     async def stream_id(self):
+        async with self._stream_lock:
+            return await self._refresh_stream()
+
+    async def _refresh_stream(self):
         if time.monotonic() < self.stream_cache[1]:
             return self.stream_cache[0]
         # IRC may remain connected for hours after its initial OAuth refresh.
@@ -151,16 +171,32 @@ class IRCAdapter:
                     r.raise_for_status()
                     streams = r.json().get("data", [])
                     if streams:
-                        identity = str(streams[0]["id"])
+                        details=streams[0]
+                        identity = str(details["id"])
+                        started=details.get("started_at")
+                        self.bridge.live_stream={"id":identity,"started_at":started}
+                        self.bridge.live_verified_until=time.monotonic()+60
+                        self.bridge.transcript.observe_stream(identity,self.room_id,started)
+                        if started:
+                            self.bridge.notifications.start_stream(identity,datetime.fromisoformat(started.replace("Z","+00:00")))
                         self.stream_cache = (identity, time.monotonic() + 60)
                         return identity
+                    if self.bridge.live_stream:
+                        self.bridge.notifications.end_stream(self.bridge.live_stream["id"])
+                    self.bridge.live_stream=None
+                    self.bridge.live_verified_until=0.0
+                    identity="offline-"+CHANNEL+"-"+datetime.now(timezone.utc).strftime("%Y%m%d")
+                    self.stream_cache=(identity,time.monotonic()+60)
+                    return identity
             except (httpx.HTTPError, ValueError, KeyError) as exc:
                 LOG.warning("Stream lookup unavailable (%s)", type(exc).__name__)
         # Fallback per-channel UTC day; not guaranteed to distinguish 2 streams
         # on the same day. Use Helix stream lookup when client ID is supplied.
-        from datetime import datetime, timezone
-        identity = CHANNEL + "-irc-day-" + datetime.now(timezone.utc).strftime("%Y%m%d")
-        self.stream_cache = (identity, time.monotonic() + 60)
+        # API uncertainty must not merge multiple real broadcasts into a day.
+        self.bridge.live_verified_until=0.0
+        self.bridge.live_stream=None
+        identity = self._unknown_session
+        self.stream_cache = (identity, time.monotonic() + 15)
         return identity
 
     async def lookup_login(self,login:str)->tuple[str,str]:
@@ -192,36 +228,23 @@ class IRCAdapter:
     async def reply(self, answer, message_id):
         if not self.ws:
             raise ConnectionError("IRC socket not connected")
-        if self.bridge.access.muted():
-            raise PermissionError("global mute: no messages may be sent")
-        if OWNER_ONLY_TEST:
-            if not message_id:
-                raise PermissionError("scheduled or anonymous posts disabled in QA")
-            row=self.bridge.db.execute(
-                "SELECT twitch_user_id,request_text,command FROM chat_events WHERE message_id=?",
-                (message_id,)).fetchone()
-            if row:
-                user_id,request,command=row
-                caps={"chat":"conversation","search":"conversation",
-                      "fact":"fact","research":"research"}
-                capability=caps.get(command) or requested_capability(request)
-                if not capability or not self.bridge.access.allowed(user_id,capability):
-                    raise PermissionError("Twitch test permission revoked or absent")
-            elif message_id not in self.bridge._owner_admin_replies:
-                raise PermissionError("unlogged response not authorized in QA")
+        self.bridge.authorize_reply(message_id)
         # Plain channel replies avoid Twitch's visually confusing mini-thread.
         # Prefix the verified sender's login instead of making the model guess.
         login=""
+        recipient=None
         if message_id:
             row = self.bridge.db.execute(
-                "SELECT twitch_login FROM chat_events WHERE message_id=?",
+                "SELECT twitch_login,twitch_user_id,stream_id FROM chat_events WHERE message_id=?",
                 (message_id,)).fetchone()
-            login = row[0] if row else ""
+            login = row[0] if row else self.bridge._privacy_replies.get(message_id,("",""))[1]
+            recipient=row
         answer=sanitize_public_reply(answer,login)
+        if recipient and recipient[1]==OWNER_TWITCH_ID and not re.search(r"\b(?:Chairman|Boss|Captain|Leader|Comandante)\b",answer,re.I):
+            answer="Boss, "+answer
         if not THREADED_REPLIES and re.fullmatch(r"[a-z0-9_]{3,25}",login or "",re.I):
             answer="@"+login+" "+answer
-        encoded = answer.encode("utf-8")[:430]
-        answer = encoded.decode("utf-8", errors="ignore")
+        answer=utf8_clip(answer,420)
         if not answer:
             return
         async with self.send_lock:
@@ -230,22 +253,23 @@ class IRCAdapter:
                 await asyncio.sleep(remaining)
             # Check again after pacing: a mute/revoke may have arrived while a
             # previous model call was generating or the IRC queue was waiting.
-            if self.bridge.access.muted():
-                raise PermissionError("global mute while reply pending")
-            if OWNER_ONLY_TEST and message_id not in self.bridge._owner_admin_replies:
-                row=self.bridge.db.execute(
-                    "SELECT twitch_user_id,request_text,command FROM chat_events WHERE message_id=?",
-                    (message_id,)).fetchone()
-                if not row:
-                    raise PermissionError("no verified message owner for reply")
-                capability={"chat":"conversation","search":"conversation",
-                            "fact":"fact","research":"research"}.get(row[2]) or requested_capability(row[1])
-                if not capability or not self.bridge.access.allowed(row[0],capability):
-                    raise PermissionError("access revoked during in-flight reply")
+            self.bridge.authorize_reply(message_id)
             reference = message_id if re.fullmatch(r"[A-Za-z0-9-]{1,90}", message_id) else ""
             tag = "@reply-parent-msg-id=" + reference + " " if reference and THREADED_REPLIES else ""
             await self.ws.send(tag + "PRIVMSG #" + CHANNEL + " :" + answer + "\r\n")
             self.last_send = time.monotonic()
+            import hashlib
+            reply_key=(message_id or "scheduled")+":"+hashlib.sha256(answer.encode()).hexdigest()[:16]
+            if recipient and not self.bridge.transcript.is_opted_out(recipient[1]):
+                # IRC exposes socket-send success, not a Twitch server message ACK.
+                # Distinct research parts count separately; repeated same parts dedup.
+                analytics_record_reply(self.bridge.db,recipient[1],reply_key,
+                    stream_id=recipient[2],login=recipient[0])
+            if not recipient or not self.bridge.transcript.is_opted_out(recipient[1]):
+                stream=recipient[2] if recipient else (self.bridge.live_stream or {}).get('id')
+                if stream:
+                    self.bridge.transcript.record(stream,"sent:"+reply_key,
+                        '1591621882',NICK or 'roborath',answer)
             if message_id:
                 # A successful websocket send is NOT a Twitch server ACK, but
                 # it proves a control command wasn't silently ignored.
@@ -258,18 +282,24 @@ class IRCAdapter:
     async def reminder_loop(self):
         """Post due reminders while connected, with the same paced IRC queue."""
         while self.ws:
-            if OWNER_ONLY_TEST:
-                # Suspend all scheduled posts during owner-only QA, including
-                # previously queued reminders to other Twitch users.
-                await asyncio.sleep(10)
-                continue
             try:
+                self.bridge.prune()
+                stream=await self.stream_id()
+                strict=os.getenv("ROBORATH_OWNER_ONLY_TEST_MODE","false").lower()=="true"
+                live=bool(self.bridge.live_stream and time.monotonic()<self.bridge.live_verified_until)
+                promotion=self.bridge.notifications.follow_tick(stream,live=live,
+                    muted=self.bridge.access.muted(),owner_only=strict)
+                if promotion:
+                    await self.reply(promotion,"")
+                if strict or not live or self.bridge.access.muted():
+                    await asyncio.sleep(10)
+                    continue
                 due = self.bridge.notifications.due(limit=4)
                 for reminder_id, user_id, note in due:
                     row=self.bridge.db.execute("""SELECT twitch_login FROM chat_events
                         WHERE twitch_user_id=? ORDER BY created_utc DESC LIMIT 1""",
                         (user_id,)).fetchone()
-                    if not row:
+                    if not row or self.bridge.transcript.is_opted_out(user_id):
                         # Retain the reminder; user identity can be resolved later.
                         continue
                     await self.reply("@"+row[0]+" reminder: "+note,"")
@@ -304,6 +334,13 @@ class IRCAdapter:
                 LOG.warning("IRC transport disconnected (%s); reconnecting", type(exc).__name__)
             finally:
                 self.ws = None
+                self.bridge.live_verified_until=0.0
+                self._unknown_session="uncertain-"+uuid4().hex
+                self.stream_cache=("",0.0)
+                self._disconnect_at=datetime.now(timezone.utc)
+                # Pending answers belong to this connection, never a future one.
+                for task in list(self._chat_tasks):task.cancel()
+                if self._chat_tasks:await asyncio.gather(*self._chat_tasks,return_exceptions=True)
             await asyncio.sleep(12)
 
     async def read_irc(self,ws):
@@ -326,6 +363,36 @@ class IRCAdapter:
                 if "You are permanently banned" in line:
                                 raise PermissionError("Account banned from channel")
                 if " PRIVMSG #" not in line:
+                    if " CLEARMSG #" in line and line.startswith("@"):
+                        tags=parse_tags(line[1:].split(" ",1)[0])
+                        mid=tags.get("target-msg-id")
+                        if mid:
+                            row=self.bridge.db.execute("SELECT stream_id FROM transcript_messages WHERE message_id=?",(mid,)).fetchone()
+                            self.bridge.transcript.delete_message(mid)
+                            with self.bridge.db:
+                                self.bridge.db.execute("DELETE FROM chat_events WHERE message_id=?",(mid,))
+                                if row:self.bridge.redact_stream_replies([row[0]])
+                    elif " CLEARCHAT #" in line and line.startswith("@"):
+                        tags=parse_tags(line[1:].split(" ",1)[0])
+                        uid=tags.get("target-user-id")
+                        if uid:
+                            # A moderation deletion erases existing text, without
+                            # permanently opting the account out of future capture.
+                            affected=self.bridge.transcript.delete_user(uid)
+                            with self.bridge.db:
+                                self.bridge.db.execute("DELETE FROM chat_events WHERE twitch_user_id=?",(uid,))
+                                self.bridge.redact_stream_replies(affected)
+                                analytics_remove_user(self.bridge.db,uid)
+                        elif CHANNEL and (" CLEARCHAT #"+CHANNEL) in line:
+                            # Twitch full-chat clear: erase every captured stream
+                            # for this one-channel database, including derived data.
+                            streams=[r[0] for r in self.bridge.db.execute("SELECT stream_id FROM transcript_sessions")]
+                            for sid in streams:self.bridge.transcript.delete_stream(sid)
+                            with self.bridge.db:
+                                self.bridge.db.execute("DELETE FROM chat_events")
+                                self.bridge.db.execute("DELETE FROM activity_buckets")
+                                self.bridge.db.execute("DELETE FROM activity_message_ids")
+                                self.bridge.db.execute("DELETE FROM activity_reply_ids")
                     continue
                 event = parse_privmsg(line)
                 if not event:
@@ -333,14 +400,20 @@ class IRCAdapter:
                 incoming_channel, payload = event
                 if incoming_channel != CHANNEL or payload["chatter_user_login"] == NICK:
                     continue
-                if OWNER_ONLY_TEST and not self.bridge.access.can_receive(
-                        payload.get("chatter_user_id",""),
-                        payload.get("message",{}).get("text",""),
-                        strict=True):
-                    continue
                 if payload["room_id"]:
                     self.room_id = payload["room_id"]
-                asyncio.create_task(self.bridge.on_chat(payload))
+                stream=await self.stream_id()
+                payload["_stream_id"]=stream
+                if self._disconnect_at:
+                    self.bridge.transcript.mark_gap(stream,self._disconnect_at,datetime.now(timezone.utc),"IRC disconnected; messages unavailable")
+                    self._disconnect_at=None
+                if not await self.bridge.observe_public(payload):continue
+                payload["_observed"]=True
+                # Bound queued AI work while still recording every public line.
+                if len(self._chat_tasks)>=32 and not self.bridge.access.is_owner(payload['chatter_user_id']):continue
+                task=asyncio.create_task(self.bridge.on_chat(payload))
+                self._chat_tasks.add(task)
+                task.add_done_callback(self._chat_tasks.discard)
 
 async def main():
     required = ["TWITCH_IRC_NICK", "TWITCH_CHANNEL_LOGIN",

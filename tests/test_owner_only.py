@@ -18,7 +18,7 @@ class OwnerOnlyTests(unittest.TestCase):
         self.old_path=bridge.DB_PATH
         os.environ["GT_TWITCH_DB"]=str(Path(self.tmp.name)/"chat.sqlite3")
         bridge.DB_PATH=os.environ["GT_TWITCH_DB"]
-        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="12345"
+        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="1414798445"
         os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="67890"
         os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"]="true"
         self.bot=Bridge()
@@ -57,17 +57,18 @@ class OwnerOnlyTests(unittest.TestCase):
             self.send(id,login,body,mid)
         self.assertEqual(self.replies,[])
         self.assertEqual(self.bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0],0)
-        self.send("12345","different_login","!ask how many r's are there in strawberry?","owner")
+        self.send("1414798445","different_login","!ask how many r's are there in strawberry?","owner")
         self.assertEqual(len(self.replies),1)
         self.assertIn("3 occurrences",self.replies[0][1])
 
     def test_missing_verified_owner_fails_closed(self):
         os.environ.pop("ROBORATH_OWNER_TWITCH_USER_ID")
-        self.send("12345","joeyleq","!rr help","owner")
+        self.send("1414798445","joeyleq","!rr help","owner")
         self.assertEqual(self.replies,[])
 
     def test_explicit_disable_restores_normal_mode(self):
         os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"]="false"
+        self.bot.access.change("1414798445","preview-grant","00001","viewer","conversation",True)
         self.send("00001","viewer","!ask how many r's are there in strawberry?","viewer")
         self.assertEqual(len(self.replies),1)
 

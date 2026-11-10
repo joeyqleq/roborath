@@ -16,7 +16,7 @@ class HelpAndToneTests(unittest.TestCase):
         self.old = {k: os.environ.get(k) for k in self.keys}
         self.oldpath = bridge.DB_PATH
         os.environ["GT_TWITCH_DB"] = str(Path(self.tmp.name) / "log.sqlite3")
-        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"] = "12345"
+        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"] = "1414798445"
         os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"] = "67890"
         os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"] = "true"
         bridge.DB_PATH = os.environ["GT_TWITCH_DB"]
@@ -43,7 +43,7 @@ class HelpAndToneTests(unittest.TestCase):
     def send(self, msg, mid):
         asyncio.run(self.bot.on_chat({
             "message_id": mid,
-            "chatter_user_id": "12345",
+            "chatter_user_id": "1414798445",
             "chatter_user_login": "joeyleq",
             "message": {"text": msg},
         }))
@@ -60,7 +60,7 @@ class HelpAndToneTests(unittest.TestCase):
             self.assertIn("!", message)
             self.assertLess(len(message.encode("utf-8")), 421)
         self.assertIn("!ask tell me a joke", self.messages[0].casefold())
-        self.assertIn("!search latest", self.messages[1].casefold())
+        self.assertIn("!rr mario", self.messages[1].casefold())
 
     def test_incomplete_commands_have_readable_examples(self):
         for i, name in enumerate(("ask", "search", "fact", "research"), 1):

@@ -1,5 +1,7 @@
 import unittest
-from scenarios import classify,exact_letter_count,history_context,repeated_count_correction
+from scenarios import (classify,exact_letter_count,history_context,
+                       repeated_count_correction,resolve_search_query,
+                       is_search_followup)
 
 
 class ScenarioTests(unittest.TestCase):
@@ -47,6 +49,40 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("!search latest video",history)
         self.assertIn("Six.",history)
         self.assertIn("may contain errors",history)
+
+    def test_generic_search_followup_uses_prior_viewer_question_not_bot_answer(self):
+        rows = [
+            ("!ask Who is the public business figure named Pat Example?",
+             "There is no evidence they own any businesses.", "chat"),
+            ("!ask Earlier unrelated question", "An unrelated answer", "chat"),
+        ]
+        self.assertTrue(is_search_followup("search the web"))
+        self.assertEqual(resolve_search_query("search the web", rows),
+                         "Who is the public business figure named Pat Example?")
+        self.assertEqual(resolve_search_query("incorrect. search the web", rows),
+                         "Who is the public business figure named Pat Example?")
+        self.assertEqual(resolve_search_query("look it up", rows),
+                         "Who is the public business figure named Pat Example?")
+        self.assertEqual(resolve_search_query("search and you shall find", rows),
+                         "Who is the public business figure named Pat Example?")
+        self.assertEqual(resolve_search_query("search nd you shall find", rows),
+                         "Who is the public business figure named Pat Example?")
+
+    def test_topical_search_followup_keeps_current_subject(self):
+        rows = [("!ask old question", "old answer", "chat")]
+        for phrase in ("search for latest Formula 1 standings",
+                       "!search latest Formula 1 standings"):
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(resolve_search_query(phrase, rows))
+
+    def test_search_followup_skips_prior_search_command_and_non_substantive_rows(self):
+        rows = [
+            ("search the web", "Search lead output", "search"),
+            ("!ask", "Usage example", "chat"),
+            ("!ask Why did the Berlin Wall fall?", "Unsupported confident answer", "chat"),
+        ]
+        self.assertEqual(resolve_search_query("look it up", rows),
+                         "Why did the Berlin Wall fall?")
 
 
 if __name__=="__main__":

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from access_control import parse_admin, requested_capability, TestAccess
+from policy import OWNER_TWITCH_ID
 
 
 class GrammarTests(unittest.TestCase):
@@ -57,6 +58,7 @@ class GrammarTests(unittest.TestCase):
         for text,cap in (
             ("!ask hello","conversation"),("!search latest news","conversation"),
             ("!fact is that real","fact"),("!check this","fact"),
+            ("!verify this","fact"),("!verify deep why this","research"),
             ("!research why","research"),("!rr help","help")):
             self.assertEqual(requested_capability(text),cap)
         self.assertIsNone(requested_capability("grant @viewerx conversation"))
@@ -67,7 +69,7 @@ class GrammarTests(unittest.TestCase):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(":memory:")
-        self.access=TestAccess(self.db,"1414798445")
+        self.access=TestAccess(self.db,OWNER_TWITCH_ID,broadcaster_id="67890")
 
     def tearDown(self):
         self.db.close()
@@ -103,7 +105,7 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(a.change("1414798445","id-1","55555","viewerx","fact",True))
         self.assertFalse(a.change("1414798445","id-1","55555","viewerx","fact",False))
         self.assertTrue(a.set_mute("1414798445","id-2",True))
-        again=TestAccess(self.db,"1414798445")
+        again=TestAccess(self.db,OWNER_TWITCH_ID,broadcaster_id="67890")
         self.assertTrue(again.muted())
         self.assertEqual(again.capabilities("55555"),{"fact"})
         self.assertFalse(again.allowed("55555","fact"))
@@ -119,11 +121,19 @@ class StoreTests(unittest.TestCase):
 
     def test_qa_commands_strictly_scoped(self):
         self.access.change("1414798445","g1","55555","viewerx","conversation",True)
-        self.assertTrue(self.access.can_receive("55555","!ask hello",True))
+        self.assertFalse(self.access.can_receive("55555","!ask hello",True))
+        self.assertTrue(self.access.can_receive("55555","!ask hello",False))
         self.assertFalse(self.access.can_receive("55555","!fact hello",True))
         self.assertFalse(self.access.can_receive("55555","!rr mario on",True))
         self.assertFalse(self.access.can_receive("55555","allow @otheruser all AI abilities",True))
         self.assertFalse(self.access.can_receive("55555","!rr remind 1m message",True))
+
+    def test_owner_only_id_and_streamer_usage_without_admin(self):
+        with self.assertRaises(ValueError):
+            TestAccess(self.db,"12345")
+        self.assertTrue(self.access.can_receive("67890","!verify claim",False))
+        self.assertFalse(self.access.can_receive("67890","stop talking",False))
+        self.assertFalse(self.access.is_owner("67890"))
 
 
 if __name__=="__main__":

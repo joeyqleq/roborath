@@ -51,8 +51,9 @@ def main():
        "GT_TWITCH_DB":"/var/lib/roborath/chat.sqlite3",
        "ROBORATH_ROUTER_LEDGER":"/var/lib/roborath/spend.sqlite3",
        "NVIDIA_VERIFIED":"false",
-       "ROBORATH_LOCAL_DECISION_ENABLED":"true",
+       "ROBORATH_LOCAL_DECISION_ENABLED":"false",
        "ROBORATH_OWNER_ONLY_TEST_MODE":"true",
+       "ROBORATH_PUBLIC_ACCESS_ENABLED":"false",
        # Explicit owner opt-in in the protected master file; do not accidentally
        # disable a verified live relay on subsequent re-provisioning.
        "ROBORATH_FACT_RELAY_ENABLED": (
@@ -65,6 +66,8 @@ def main():
     if not all(environment.get(k,"").isdecimal() for k in ("ROBORATH_OWNER_TWITCH_USER_ID",
                                                           "ROBORATH_STREAMER_TWITCH_USER_ID")):
         raise ValueError("verified immutable Twitch owner and broadcaster IDs are required")
+    if environment["ROBORATH_OWNER_TWITCH_USER_ID"] != "1414798445":
+        raise ValueError("owner must be verified joeyleq ID 1414798445")
     if DEST.exists():
         p=Path("/etc/roborath.env.pre-provision")
         if not p.exists():

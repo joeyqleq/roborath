@@ -1,0 +1,17 @@
+# Nebius comparison and remaining acceptance work
+
+27 actual synthetic inference requests completed: 15 initial conversation cases across Hermes 4 405B, Qwen3 30B A3B Instruct 2507 and Qwen3 235B A22B Instruct 2507, followed by 12 owner/context cases across Hermes and Qwen30. Raw synthetic prompts, answers, usage and latency are in `benchmarks/`. No private transcript was uploaded in these tests. This is a small diagnostic sample, not a long-conversation endurance test.
+
+The initial five requests per model had median latencies of 3.248 seconds (Hermes), 3.952 seconds (Qwen30), and 3.933 seconds (Qwen235). List-price estimates ignoring cache discounts were $0.004590, $0.0004764 and $0.0009336 respectively for those five requests. Model APIs reported token usage; Mattermost did not.
+
+In the six owner/context cases, both Hermes and Qwen30 correctly attributed the supplied historical chat excerpts and used the supplied NASA evidence. Hermes followed the requested owner tone more consistently. Qwen30 added an irrelevant political joke to a factual answer and a patronizing closing sentence to a blocked-page response. Both produced short political satire without a generic refusal. These are human observations of this sample, not a benchmark-wide quality score. A subsequent owner-prompt revision addresses those two failures but has not yet been evaluated live.
+
+Recommended economical conversation default: Nebius Qwen3-30B-A3B-Instruct-2507, with bounded retrieved context. Hermes is a much larger 405-billion-parameter model and a candidate when tone consistency is worth the extra cost. The official Nebius catalog lists Hermes at $1 input/$3 output per million tokens and Qwen30 at $0.10/$0.30, a 10x price difference at equal token counts. Qwen235 is marked deprecated in the catalog; do not make it a new default escalation route. User confirms the current Hermes relay is Nebius, not OpenRouter. The reported $29.75 dashboard balance is not independently verified and is not evidence that inference is free.
+
+Cloudflare Workers AI advertises 10,000 free neurons per day. Its Qwen30 listing is $0.051/$0.335 per million input/output tokens; its model variant differs from the Nebius Instruct 2507 variant and has not been tested here. No account, purchase or Cloudflare inference route was activated.
+
+Sources: [Nebius official catalog](https://tokenfactory.nebius.com/api/public/models_info), [Cloudflare pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+
+Relay payload measurements for the same bounded question: fact prompt 1,069 to 711 UTF-8 bytes; research 960 to 715. Bytes are not billed tokens. The private synthetic relay test produced a correlated final reply in 6.43 seconds without tool artifacts. It cited a NASA page under an inaccurate title; the actual page is Chapter 14: Launch and does mention Earth's orbit around the Sun. Actual tool execution, full research source support and upstream billing remain unproven. Source URL syntax validation does not establish source accuracy.
+
+Remaining acceptance: instrument actual Mattermost model/tool token usage; verify source retrieval and contested-history research; benchmark reachable self-hosted crawlers; retest latest owner prompt; complete a multi-turn conversation evaluation. Search currently returns explicitly labeled discovery leads, not article-grounded synthesis. Local shared chat retrieval uses a bounded recent window plus relevant older excerpts from the same stream. No five-hour raw prompt is sent.

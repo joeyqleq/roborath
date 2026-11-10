@@ -60,7 +60,7 @@ def regulars(db, limit):
     if not rows:
         print("no recorded chat activity")
     for login,streams,days,messages,buckets in rows:
-        print(f"{login}: {messages} msgs, {buckets} active 5min buckets, {streams} streams, {days} days")
+        print(f"{login}: {messages} msgs, {buckets} active daily buckets, {streams} streams, {days} days")
 
 
 def quotas(db, limit):

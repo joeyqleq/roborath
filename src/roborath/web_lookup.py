@@ -6,7 +6,11 @@ A keyless metasearch library can be rate-limited/unavailable; fail explicitly.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import json
+import os
 import re
+import time
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
@@ -22,6 +26,13 @@ LOCATION = re.compile(
     r"(?:\s+(?:right now|currently|today|tonight|this morning|"
     r"at the moment)|\s*[?!.,]*$)", re.I)
 NOW = re.compile(r"\b(now|current|today|tonight|right now|at the moment)\b", re.I)
+
+# SearXNG is useful only when the operator configures a stable, private service
+# address. Never bake a Docker container IP into application code: those are
+# ephemeral. Several trusted endpoints can be comma-separated for fallback.
+SEARXNG_URLS_ENV = "ROBORATH_SEARXNG_URLS"
+_searx_failures: dict[str, float] = {}
+_SEARX_COOLDOWN_SECONDS = 30.0
 
 WMO = {
     0:"clear",1:"mainly clear",2:"partly cloudy",3:"overcast",
@@ -74,40 +85,136 @@ def _bing_rss(query: str) -> list[dict[str, str]]:
 
 def _search_sync(query: str) -> tuple[str, str]:
     # Short, bounded snippets only. Do not fetch or execute linked webpages.
-    from ddgs import DDGS
-    items = []
-    # Keyless upstream search engines can rate-limit one provider. Try two
-    # explicit backends; never fabricate results after a provider failure.
-    for backend in ("google", "bing"):
-        try:
-            with DDGS(timeout=7) as client:
-                items = client.text(query, backend=backend, max_results=3) or []
-            if items:
-                break
-        except Exception:
-            continue
+    items = _searxng(query)
+    if not items:
+        items = _ddgs_search(query)
     if not items:
         try:
             items=_bing_rss(query)
         except (httpx.HTTPError, ElementTree.ParseError, ValueError):
             items=[]
+    return _format_results(items)
+
+
+def _searxng(query: str) -> list[dict[str, str]]:
+    """Query configured SearXNG instances; failure is isolated per endpoint.
+
+    Endpoints are trusted operator configuration, not chat input. Only HTTP(S)
+    origins without userinfo, query, fragment or nonstandard ports are allowed.
+    Redirects are disabled, responses are size-limited, and linked pages are
+    never fetched here.
+    """
+    endpoints = [value.strip().rstrip("/") for value in
+                 os.getenv(SEARXNG_URLS_ENV, "").split(",") if value.strip()]
+    now = time.monotonic()
+    for endpoint in endpoints[:3]:
+        try:
+            parsed = urlsplit(endpoint)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname or
+                    parsed.username or parsed.password or parsed.query or parsed.fragment or
+                    not re.fullmatch(r"[A-Za-z0-9._:-]+", parsed.hostname)):
+                continue
+            if _searx_failures.get(endpoint, 0) > now:
+                continue
+            with httpx.stream(
+                    "GET", endpoint + "/search",
+                    params={"q": query[:250], "format": "json",
+                            "language": "en", "categories": "general"},
+                    headers={"Accept": "application/json", "User-Agent": "RoboRath/0.1 search"},
+                    timeout=4, follow_redirects=False) as response:
+                response.raise_for_status()
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 512_000:
+                        raise ValueError("SearXNG response too large")
+            data = json.loads(body)
+            results = data.get("results", [])
+            if not isinstance(results, list):
+                raise ValueError("SearXNG response schema invalid")
+            items = []
+            for result in results[:10]:
+                if not isinstance(result, dict):
+                    continue
+                url = str(result.get("url") or result.get("pretty_url") or "")
+                title = str(result.get("title") or "")
+                if _safe_search_result(url) and title.strip():
+                    items.append({"href": url, "title": title})
+            _searx_failures.pop(endpoint, None)
+            if items:
+                return items
+        except Exception:
+            # Treat network, transport and malformed-provider failures alike;
+            # DDGS and Bing remain independently available.
+            _searx_failures[endpoint] = now + _SEARX_COOLDOWN_SECONDS
+    return []
+
+
+def _safe_search_result(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+        try:
+            ipaddress.ip_address(host.strip("[]"))
+            return False
+        except ValueError:
+            pass
+        return (parsed.scheme == "https" and bool(host) and not parsed.username and
+                not parsed.password and parsed.port in (None, 443) and
+                "." in host and not host.endswith((".local", ".internal", ".localhost")) and
+                len(url) <= 2048)
+    except ValueError:
+        return False
+
+
+def _ddgs_search(query: str) -> list[dict[str, str]]:
+    """Try keyless DDGS backends in order; never fabricate on provider error."""
+    try:
+        from ddgs import DDGS
+        for backend in ("google", "bing"):
+            try:
+                with DDGS(timeout=7) as client:
+                    items = client.text(query, backend=backend, max_results=3) or []
+                if items:
+                    return items
+            except Exception:
+                continue
+    except ImportError:
+        pass
+    return []
+
+
+def _format_results(items: list[dict[str, str]]) -> tuple[str, str]:
+    """Present titles and public URLs as discovery leads, never verified facts."""
     lines = []
     first_domain = ""
-    for item in items[:2]:
+    seen_urls: set[str] = set()
+    seen_domains: set[str] = set()
+    for item in items[:10]:
+        if len(lines) >= 2:
+            break
         url = str(item.get("href") or item.get("url") or "")
-        parsed = urlsplit(url)
-        if parsed.scheme != "https" or not parsed.hostname:
+        if not _safe_search_result(url):
             continue
-        domain = parsed.hostname.removeprefix("www.")
+        parsed = urlsplit(url)
+        domain = (parsed.hostname or "").removeprefix("www.")
+        canonical_url = parsed._replace(fragment="").geturl()
+        if canonical_url in seen_urls or domain in seen_domains:
+            continue
+        seen_urls.add(canonical_url)
+        seen_domains.add(domain)
         title = re.sub(r"\s+", " ", str(item.get("title", "")))[:95]
+        # Do not relay snippets: search providers return untrusted text and the
+        # title is only a discovery lead, not evidence that a claim is true.
+        title = re.sub(r"[\x00-\x1f\x7f]", " ", title).strip()
+        if not title:
+            continue
         if not first_domain:
             first_domain = domain
         lines.append(f"{title} ({domain}) {url[:230]}")
-    # Search snippets are not verified article text; never let an LLM invent
-    # a winner, date, or alleged fact merely from these result titles.
     if not lines:
         return "", ""
-    return "Web results (open for details): " + " | ".join(lines), first_domain
+    return "Search leads only; titles are not verified facts: " + " | ".join(lines), first_domain
 
 
 async def _weather(question: str, http: httpx.AsyncClient) -> tuple[str, str]:

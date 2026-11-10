@@ -9,8 +9,9 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+OWNER_TWITCH_ID = "1414798445"
 BASE_LIMITS = {"fact": 1, "research": 1}
-SUPERVISOR_CAPABILITIES = {"fact_grant", "research_grant", "mario_manage", "trigger_manage"}
+SUPERVISOR_CAPABILITIES: set[str] = set()
 PUBLIC_CAPABILITIES = {"fact", "research", "mario_read", "help"}
 
 @dataclass(frozen=True)
@@ -26,15 +27,23 @@ def utc_day(when: datetime | None = None) -> str:
     return now.astimezone(timezone.utc).date().isoformat()
 
 def parse_public(text: str):
-    """Strict invocation avoids triggering on rath's name, cheers or quoted bot."""
+    """Return billing capability and question for explicit check invocations.
+
+    !verify is quick by default; an explicit "deep" prefix spends the research
+    allowance. Explanatory question words deterministically select research.
+    Legacy !fact and !research keep their original routing.
+    """
     text = text.strip()
-    pattern = r"^(?:!fact|!check|!research|!rr\s+(?:fact|check|research)|@roborath\s+(?:fact|check|research)|(?:hey\s+)?roborath\s*[,!:]\s*(?:fact|check|research))(?=\s|$)"
+    pattern = r"^(?:!fact|!check|!verify|!research|!rr\s+(?:fact|check|verify|research)|@roborath\s+(?:fact|check|verify|research)|(?:hey\s+)?roborath\s*[,!:]\s*(?:fact|check|verify|research))(?=\s|$)"
     m = re.match(pattern, text, re.IGNORECASE)
     if not m:
         return None
     verb = m.group().lower()
-    capability = "research" if "research" in verb else "fact"
     question = text[m.end():].strip()
+    deep = bool(re.match(r"^(?:deep|research)\s+", question, re.I))
+    if deep:
+        question = re.sub(r"^(?:deep|research)\s+", "", question, count=1, flags=re.I).strip()
+    capability = "research" if "research" in verb or deep else "fact"
     if not question:
         return None
     return capability, question[:700]
@@ -44,6 +53,8 @@ class PolicyStore:
         self.db = db
         # Never accept usernames for privileged identities.
         self.owner_id = self._require_id(owner_id)
+        if self.owner_id != OWNER_TWITCH_ID:
+            raise ValueError("configured owner ID does not match verified joeyleq identity")
         self.broadcaster_id = self._require_id(broadcaster_id)
         self.db.execute("""CREATE TABLE IF NOT EXISTS rr_consumptions(
            message_id TEXT PRIMARY KEY, twitch_user_id TEXT NOT NULL,
@@ -74,30 +85,15 @@ class PolicyStore:
         return actor_id == self.owner_id
 
     def can_manage(self, actor_id: str, capability: str) -> bool:
-        if self.is_owner(actor_id):
-            return True
-        if capability not in SUPERVISOR_CAPABILITIES:
-            return False
-        return self.db.execute(
-            "SELECT 1 FROM rr_supervisors WHERE user_id=? AND capability=?",
-            (actor_id, capability)
-        ).fetchone() is not None
+        # Compatibility shim: management is never delegated.
+        return self.is_owner(actor_id)
 
     def delegate(self, actor_id: str, target_id: str, capability: str, enabled=True):
         """Only verified owner can install/revoke bounded persistent permissions."""
         if not self.is_owner(actor_id):
             raise PermissionError("only owner can delegate")
         target_id = self._require_id(target_id)
-        if capability not in SUPERVISOR_CAPABILITIES:
-            raise ValueError("capability is not delegable")
-        with self.db:
-            if enabled:
-                self.db.execute("""INSERT OR REPLACE INTO rr_supervisors
-                   (user_id,capability,granted_by) VALUES(?,?,?)""",
-                   (target_id,capability,actor_id))
-            else:
-                self.db.execute("""DELETE FROM rr_supervisors
-                   WHERE user_id=? AND capability=?""",(target_id,capability))
+        raise ValueError("administrative capabilities cannot be delegated")
 
     def scope(self, capability: str, stream_id: str, day: str | None = None):
         if capability == "fact":
@@ -152,7 +148,7 @@ class PolicyStore:
             limit = BASE_LIMITS[capability] + (added[0] if added else 0)
             if spent >= limit:
                 self.db.rollback()
-                return Decision(False, "limit reached; ask a RoboRath supervisor for more", 0)
+                return Decision(False, "limit reached; ask the owner for more", 0)
             self.db.execute("""INSERT INTO rr_consumptions
                (message_id,twitch_user_id,capability,scope,used_utc)
                VALUES(?,?,?,?,?)""",

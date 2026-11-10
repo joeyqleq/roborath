@@ -27,7 +27,9 @@ class AdminIntegrationTests(unittest.TestCase):
         bridge.DB_PATH=os.environ["GT_TWITCH_DB"]
         os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]=OWNER
         os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="88888"
-        os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"]="true"
+        # This suite exercises explicitly granted preview access. Strict
+        # owner-only QA has a separate suite and suppresses even these grants.
+        os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"]="false"
         os.environ["ROBORATH_FACT_RELAY_ENABLED"]="false"
         bridge.last_user_call.clear()
         bridge.last_cooldown_notice.clear()

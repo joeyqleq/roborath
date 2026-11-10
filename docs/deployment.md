@@ -1,99 +1,59 @@
-## Current operational state — 2026-11-08
+# ORA3 operations, deployment and rollback
 
-RoboRath is enabled on ORA3 as a **conversation and Mario Kart capable Twitch bot**.
-The dedicated Twitch OAuth token was refreshed and identity-checked against
-`roborath` (immutable user ID `1591621882`). The systemd service
-`roborath-irc.service` is active and enabled, and IRC connected to
-`rath_bone` as a normal viewer. A synthetic inbound `!ask` message passed
-through the real external model router and generated a valid response.
+This runbook distinguishes checked live state from the local working tree. GitHub pushes do not update ORA3 automatically. Public bot access stays closed until the owner explicitly authorizes it.
 
-The private Mattermost relay does not yet have a dedicated bot account/token.
-Fact/research deliberately fail closed before quota consumption.
-`ROBORATH_FACT_RELAY_ENABLED` defaults to false, and should only be enabled
-after testing the restricted bot account and thread response. Admin AI is not
-exposed to public Twitch messages.
+## Verified snapshot, 2026-11-10
 
-**Do not run `systemctl disable --now roborath-irc` to provision the future relay.**
-The installer now preserves existing service enablement; restart the service
-only for approved code/config changes. Never paste live provider credentials
-into Git or logs. Read-only check:
-`systemctl status roborath-irc.service`.
+- ORA3 `roborath-irc.service`: active, enabled, zero systemd restarts at inspection.
+- ORA3 source checkout `/home/jq/projects/roborath` and installed runtime `/opt/roborath`: both at `b69675c`.
+- `ROBORATH_OWNER_ONLY_TEST_MODE=true` and `ROBORATH_FACT_RELAY_ENABLED=true` were reported by the live process. Secret values were not printed.
+- ORA1 Mattermost private relay channel membership: owner `p5n`, specialist `greenthumb-ai`, and `roborath-relay` bot. The bot is non-admin.
+- One short private synthetic FactCheck request produced a source-attributed final answer in 6.43 seconds. This confirms a bounded synthetic request/reply, not independent proof of actual source-retrieval calls, token billing, broad factual accuracy, or public Twitch delivery.
+- No production deployment of the newer local work has occurred. Local tests and reports describe source checkout only.
 
-# ORA3 deployment / go-live checklist
+Recheck live state before an operation. Keep output limited to service state, Git hashes, and boolean configuration presence; never print `/etc/roborath.env`, token files, private channel messages, or unredacted SQLite rows.
 
-This repo intentionally leaves the bot OFF until authorized, validated, and tested.
+## Safe read-only inspection
 
-## A. Prepare ORA3
-
-1. Update working checkout: `cd /home/jq/projects/roborath && git pull --ff-only origin main`
-2. Run `sudo bash deploy/install-ora3.sh`. This installs the runtime and systemd unit but **does not enable or start** it.
-3. Ensure `/etc/roborath.env` is readable by systemd only: root:root, mode `0600`. Start with the repository's `.env.example` as a reference, never commit the populated file.
-4. The private OAuth token file belongs to Linux user `roborath`, mode `0600`, located at `/var/lib/roborath/private/oauth.json`.
-
-## B. Authorize Twitch RoboRath account on the DESKTOP
-
-1. Rotate any previously shared Twitch client secret in the Twitch Developer Console.
-2. Configure confidential application callback exactly `http://localhost:3000`.
-3. On the desktop, install the Python dependencies `httpx` and `websockets`, and set only the new Client ID in `TWITCH_CLIENT_ID`.
-4. Sign into Twitch as **roborath**, not joeyleq or rath_bone, then run:
+From an authorized SSH session, check service and revisions without displaying configuration values:
 
 ```sh
-PYTHONPATH=src/roborath python src/roborath/setup_cli.py authorize
-PYTHONPATH=src/roborath python src/roborath/setup_cli.py resolve-ids
+sudo systemctl is-active roborath-irc.service
+sudo systemctl is-enabled roborath-irc.service
+sudo systemctl show roborath-irc.service -p NRestarts -p MainPID --no-pager
+git -C /home/jq/projects/roborath rev-parse --short HEAD
+git -C /opt/roborath rev-parse --short HEAD
 ```
 
-The CLI prompts for the client secret with hidden input, validates the logged-in Twitch user, and stores a private OAuth token file. The resolver displays immutable numeric IDs for the verified accounts `joeyleq` and `rath_bone`.
+For private environment checks, print only allow-listed flag names and `present`/`missing` status using a reviewed local script. Do not run `cat`, `env`, or `systemctl show -p Environment` against the live secrets. Read logs with bounded time ranges and redact user content and request material.
 
-5. Privately transfer the OAuth file to ORA3 through your authenticated SSH/Tailscale connection; **do not** paste it in chat. Copy it to the private destination and assign ownership to `roborath:roborath`. Ensure its parent directory is mode 0700.
+## Owner-only QA operation
 
-## Current ORA1 relay provisioning (2026-11-02)
+`ROBORATH_OWNER_ONLY_TEST_MODE=true` means only immutable owner Twitch ID `1414798445` may receive public replies. Existing user grants and the streamer's unlimited AI-use policy do not bypass this QA gate. Scheduled Follow reminders are paused. Keep the separate ORA1 relay private and non-admin. Never toggle public mode or send a public test as part of a code deployment unless the owner explicitly authorizes that test.
 
-- **Private channel exists:** `p5n-net:roborath-relay` (channel ID `9h5zep771i8umnacsdpt6nfosy`).
-- **Channel membership verified:** owner `p5n` and fact-check agent `greenthumb-ai` (user ID `d66mch8hwtrfzdj795wgctzxra`).
-- **Bot account missing:** the separate non-admin `roborath-relay` bot has not yet been created.
-- The Mattermost CLI on ORA1 returns **“This command cannot be run in local mode”** for `mmctl --local bot create`. Do not bypass this with server or database writes. Creation requires an authenticated Mattermost system-admin UI/API session.
+The source repository contains new stream transcript, verification, timer, rule and output-validation code. Its presence in Git does not imply those features are installed or currently enabled on ORA3.
 
-### Finish via the supported Mattermost administrator UI
+## Approved release preparation
 
-1. Sign in to `https://matter.greenthumb.lol` as the existing system administrator `p5n`.
-2. Open **System Console → Integrations → Bot Accounts**, then create bot username **`roborath-relay`** with display name **RoboRath Relay**. Leave it a regular non-admin account, not a system administrator.
-3. Generate and securely retain its access token. Do **not** paste it in Twitch, GitHub, or a chat message.
-4. Add the bot to the `p5n-net` team and the private `roborath-relay` channel, alongside `p5n` and `greenthumb-ai`. No other users or Admin AI.
-5. Enter the bot token locally in the owner-only ORA3 `/home/jq/credentials.env` as `MATTERMOST_RELAY_BOT_TOKEN`, and set `MATTERMOST_RELAY_CHANNEL_ID=9h5zep771i8umnacsdpt6nfosy`.
-6. Run `sudo python3 /home/jq/projects/roborath/deploy/provision-runtime.py` to update the private `/etc/roborath.env` from the master. This does not activate a service.
-7. Before enabling Twitch posting, use the new token to verify the bot account identity and private channel membership, send one harmless internal test to the FactCheck agent, confirm an actual reply, and validate the one-fact/stream research quotas. Only then enable `roborath-irc.service`.
+Only after code review and local tests pass, and after the owner authorizes the release:
 
-Twitch device authorization has **already completed and been verified** as `roborath` (Twitch user ID `1591621882`); OAuth is installed as a private file at `/var/lib/roborath/private/oauth.json` on ORA3. This step does not need repeating.
+1. Record the current source and installed revisions, service status, `NRestarts`, service user, owner-only QA flag state, and database file path/size/permissions. Confirm no unrelated source edits are present on the server.
+2. Stop only `roborath-irc.service` for a consistent database snapshot. Do not stop Mattermost or other ORA services.
+3. Create a private root-owned backup directory with mode `0700`. Copy `/etc/roborath.env` and private OAuth material using mode `0600`; never display or paste their contents. Preserve the prior source/runtime revision.
+4. Use SQLite's online backup API for `/var/lib/roborath/chat.sqlite3`, not a raw copy of a live WAL database. For example, an approved root-owned Python helper should open the source with `sqlite3.connect('file:/var/lib/roborath/chat.sqlite3?mode=ro', uri=True)` and call `source.backup(destination)` where the destination is a new file inside the private backup directory, then close both connections. Set the backup file to `0600`, verify it opens and has expected tables, and keep it out of Git and logs. Include any separate spend/analytics database if the live configuration uses one.
+5. Fetch the intended non-force-pushed main revision and verify its full commit hash. Run the documented install procedure. Do not use `enable --now` as a routine update; preserve the existing enabled state and start only the specific service after installation.
+6. Start the service and check health, `NRestarts`, installed revision, and safe owner-only operation. Do not disclose or post to public chat. A private relay smoke test must be short, bounded, and return only final content.
 
-## C. Mattermost isolation
+The production procedure is intentionally approval-gated; these instructions do not authorize a release, public-mode change, purchase, or public test.
 
-- Create a distinct non-admin Mattermost **bot** for public Twitch requests.
-- Create a dedicated private relay channel for the bot and the designated FactCheck/Research AI user.
-- Never give this bot access to privileged Admin AI, private owner files, secrets, SpiderFoot scans, or unrestricted MCP tools.
-- Validate `activate_ai` with a single, harmless test message and a bounded AI response.
-- Put the generated Mattermost bot token and channel ID into `/etc/roborath.env` (mode 0600), not into GitHub or chat.
+## Rollback
 
-## D. Offline verification
+If the updated service fails during an approved deployment, stop only `roborath-irc.service`, restore the previous source/runtime revision and its matching application files, and restore the SQLite backup only if the new code migrated or damaged the schema. Keep the service stopped while restoring the database. Restore the corresponding private environment and OAuth files with their original owner and restrictive permissions. Start the same service and verify the old revision, active state, `NRestarts`, owner-only QA flag, and database open/read checks. Do not restore a database from a newer schema into older code unless compatibility has been verified. Preserve a redacted incident note; do not upload backup artifacts.
 
-```sh
-python -m compileall -q src/roborath
-PYTHONPATH=src/roborath python -m unittest discover -s tests -p 'test_*.py' -v
-PYTHONPATH=src/roborath python tests/test_bridge.py
-PYTHONPATH=src/roborath python tests/test_irc_adapter.py
-```
+## Relay isolation
 
-Confirm token refresh on ORA3 and verify the OAuth account is the new RoboRath account. Confirm the configured owner numeric Twitch ID actually resolves to `joeyleq`, and the streamer ID to `rath_bone`. Test the quota reset using **different** broadcast IDs, duplicate message handling, a fact answer, a research answer, a reminder, opt-out, Mario Kart score confirmation, and outbound reply pacing.
+Mattermost relay lives in the existing ORA1 server and private `roborath-relay` channel. The relay account must remain non-admin and limited to the dedicated channel and specialist agent. Do not add Admin AI, filesystem access, shell execution, Shodan, or unrestricted tools. The synthetic QA result mentioned above does not prove the end-to-end evidence chain or paid token usage.
 
-## E. Activate only after verification
+## First-time setup reference
 
-Run `sudo systemctl enable --now roborath-irc.service` on ORA3 **only after A–D succeed**. The prior `gt-twitch-bridge.service` must remain disabled so two bots cannot respond to the same message.
-
-## Known unfinished integrations
-
-- Native Mattermost System Console / administrator visual analytics view
-- Security/ZAP/SpiderFoot tool integration and authorization checks
-- Breaking-news source ingestion, editorial verification and deduplicated publication
-- Rich historical chat search UI, human-in-the-loop research corrections and voice/video observations
-- Offline→live Twitch stream boundary testing and external load tests
-
-No service has been activated through GitHub commits alone.
+The RoboRath Twitch account OAuth was already verified and installed on ORA3 as user ID `1591621882`; do not repeat setup as part of routine deploys. The owner ID is `1414798445`. Resolve the broadcaster's numeric Twitch ID through authenticated Twitch data rather than guessing it. Secret rotation, new account creation and scopes are separate owner-approved tasks. Use [.env.example](../.env.example) for variable names only; never populate it with live values.

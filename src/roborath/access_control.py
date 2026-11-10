@@ -6,8 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 import re
 import sqlite3
+from policy import parse_public
+from policy import OWNER_TWITCH_ID
 
 CAPABILITIES = ("conversation", "fact", "research")
 LOGIN = r'@?["\'“”‘’]?([a-z][a-z0-9_]{2,24})["\'“”‘’]?'
@@ -45,6 +48,7 @@ class AdminIntent:
     action: str
     login: str = ""
     capability: str = ""
+    wake_phrase: str = ""
 
 def normalized_cap(value: str) -> str:
     val=value.casefold().strip()
@@ -57,6 +61,9 @@ def parse_admin(raw: str) -> AdminIntent | None:
     text=raw.strip().replace("’","'").replace("‘","'").replace("“",'"').replace("”",'"')
     text=PREFIX.sub("",text,count=1).strip().casefold().rstrip(".!,")
     text=re.sub(r"[,;:]+\s*", " ",text).strip()
+    wake=re.fullmatch(r"(?:stop (?:talking|replying|responding)|(?:stay|be|go) (?:silent|quiet))\s+(?:unless|until)\s+i\s+say\s+[\"']?([a-z0-9][a-z0-9 -]{0,49}?)[\"']?",text)
+    if wake:
+        return AdminIntent("mute",wake_phrase=wake[1].strip())
     if text in MUTE or re.fullmatch(
         r"(?:stop talking(?:\s+don't reply to anyone)?|don't reply to anyone|"
         r"do not reply to anyone|dont reply to anyone)"
@@ -82,22 +89,32 @@ def parse_admin(raw: str) -> AdminIntent | None:
 def requested_capability(raw: str) -> str | None:
     text=raw.strip().casefold()
     if parse_admin(text):return None
+    specialist=parse_public(text)
+    if specialist:return specialist[0]
     if re.match(r'^(?:!ask\s|!rr\s+ask\s|!search\s|(?:hey\s+)?roborath\s*[:,!]\s|@roborath\s+ask\s)',text):
         return "conversation"
-    if re.match(r'^(?:!fact|!check|!rr\s+(?:fact|check)|@roborath\s+(?:fact|check)|(?:hey\s+)?roborath\s*[:,!]\s*(?:fact|check))(?=\s|$)',text):
+    if re.match(r'^(?:!fact|!check|!verify|!rr\s+(?:fact|check|verify)|@roborath\s+(?:fact|check|verify)|(?:hey\s+)?roborath\s*[:,!]\s*(?:fact|check|verify))(?=\s|$)',text):
+        parsed = parse_public(text)
+        if parsed:
+            return parsed[0]
         return "fact"
     if re.match(r'^(?:!research|!rr\s+research|@roborath\s+research|(?:hey\s+)?roborath\s*[:,!]\s*research)(?=\s|$)',text):
         return "research"
-    if re.fullmatch(r'!rr\s+help(?:\s+[12])?',text):return "help"
+    if re.fullmatch(r'!rr\s+(?:help(?:\s+(?:[1-4]|ask|search|verify|fact|research|mario|alerts|triggers|reminders|privacy|permissions|admin))?|commands(?:\s+[1-4])?)',text):return "help"
     if re.fullmatch(r'!(?:ask|search)\s*',text):return "conversation"
     if re.fullmatch(r'!(?:fact|check)\s*',text):return "fact"
     if re.fullmatch(r'!research\s*',text):return "research"
+    if re.match(r'^(?:!rr\s|\?!\s)',text):return "conversation"
     return None
 
 class TestAccess:
-    def __init__(self,db:sqlite3.Connection,owner_id:str):
+    def __init__(self,db:sqlite3.Connection,owner_id:str, broadcaster_id:str|None=None):
         self.db=db
         self.owner_id=str(owner_id or "")
+        if self.owner_id and self.owner_id != OWNER_TWITCH_ID:
+            raise ValueError("configured owner ID does not match verified joeyleq identity")
+        self.broadcaster_id=str(broadcaster_id if broadcaster_id is not None else
+                                os.getenv("ROBORATH_STREAMER_TWITCH_USER_ID",""))
         self.db.execute("""CREATE TABLE IF NOT EXISTS rr_test_access (
            user_id TEXT NOT NULL, login TEXT NOT NULL, capability TEXT NOT NULL,
            granted_at TEXT NOT NULL, PRIMARY KEY(user_id,capability))""")
@@ -122,14 +139,25 @@ class TestAccess:
             (mid,action,target or None,cap or None,datetime.now(timezone.utc).isoformat()))
         return cursor.rowcount==1
 
-    def set_mute(self,actor_id:str,mid:str,enabled:bool)->bool:
+    def set_mute(self,actor_id:str,mid:str,enabled:bool,wake_phrase:str="")->bool:
         if not self.is_owner(actor_id):raise PermissionError("only owner may mute or resume")
+        if wake_phrase and not re.fullmatch(r"[a-z0-9][a-z0-9 -]{0,49}",wake_phrase):
+            raise ValueError("invalid resume phrase")
         with self.db:
             if not self._audit(mid,"mute" if enabled else "resume"):return False
             self.db.execute("""INSERT INTO rr_runtime_flags VALUES ('muted',?,?)
               ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
               ("1" if enabled else "0",datetime.now(timezone.utc).isoformat()))
+            self.db.execute("""INSERT INTO rr_runtime_flags VALUES ('wake_phrase',?,?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
+              (wake_phrase if enabled else "",datetime.now(timezone.utc).isoformat()))
         return True
+
+    def matches_wake_phrase(self,actor_id:str,raw:str)->bool:
+        if not self.is_owner(actor_id) or not self.muted():return False
+        row=self.db.execute("SELECT value FROM rr_runtime_flags WHERE key='wake_phrase'").fetchone()
+        text=PREFIX.sub("",raw.strip(),count=1).strip().casefold().rstrip(".!?,")
+        return bool(row and row[0] and text==row[0])
 
     def change(self,actor_id:str,mid:str,target_id:str,login:str,cap:str,enabled:bool)->bool:
         if not self.is_owner(actor_id):raise PermissionError("only owner may administer")
@@ -157,14 +185,22 @@ class TestAccess:
     def allowed(self,user_id:str,cap:str)->bool:
         if not self.owner_id or not self.owner_id.isdigit() or self.muted():return False
         if self.is_owner(user_id):return True
+        if self.broadcaster_id.isdigit() and user_id==self.broadcaster_id and cap in CAPABILITIES:
+            return True
+        if os.getenv("ROBORATH_PUBLIC_ACCESS_ENABLED","false").lower()=="true" and cap in (*CAPABILITIES,"help"):
+            return True
         if cap=="help":return bool(self.capabilities(user_id))
         return cap in self.capabilities(user_id)
 
     def can_receive(self,user_id:str,raw:str,strict:bool=True)->bool:
-        if self.is_owner(user_id):return True
         if self.muted():return False
-        if not strict:return True
+        if self.is_owner(user_id):return True
+        # During owner-only QA grants are intentionally inert. A display name,
+        # prior grant or streamer claim cannot bypass this global boundary.
+        if strict:return False
         cap=requested_capability(raw)
+        if cap in CAPABILITIES and self.broadcaster_id.isdigit() and user_id==self.broadcaster_id:
+            return True
         return bool(cap and self.allowed(user_id,cap))
 
     def summary(self)->str:

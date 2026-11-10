@@ -24,6 +24,73 @@ class WeatherClient:
 
 
 class WebLookupTests(unittest.TestCase):
+    def test_searxng_results_are_bounded_valid_and_not_treated_as_evidence(self):
+        from unittest.mock import patch
+        from web_lookup import _search_sync, _searx_failures
+
+        class SearchResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def iter_bytes(self): return iter([b'{"results":[]}'])
+            def raise_for_status(self): pass
+        class SearchResponseWithResults(SearchResponse):
+            def iter_bytes(self):
+                import json
+                return iter([json.dumps({"results": [
+                    {"title": "First result", "url": "https://example.com/story"},
+                    {"title": "Duplicate domain", "url": "https://www.example.com/other"},
+                    {"title": "Private destination", "url": "http://127.0.0.1/admin"},
+                    {"title": "Second source", "url": "https://news.example.org/story"},
+                ]}).encode()])
+
+        with patch.dict("os.environ", {"ROBORATH_SEARXNG_URLS": "http://searx.internal:8080"}), \
+             patch("web_lookup.httpx.stream", return_value=SearchResponseWithResults()) as get, \
+             patch("web_lookup._ddgs_search", side_effect=AssertionError("fallback should not run")), \
+             patch("web_lookup._bing_rss", side_effect=AssertionError("fallback should not run")):
+            _searx_failures.clear()
+            answer, domain = _search_sync("find a story")
+
+        self.assertEqual(domain, "example.com")
+        self.assertIn("First result", answer)
+        self.assertIn("Second source", answer)
+        self.assertNotIn("Duplicate domain", answer)
+        self.assertNotIn("Private destination", answer)
+        self.assertNotIn("provider snippet", answer)
+        self.assertIn("titles are not verified facts", answer)
+        self.assertEqual(get.call_args.kwargs["timeout"], 4)
+        self.assertFalse(get.call_args.kwargs["follow_redirects"])
+
+    def test_malformed_or_private_searx_origins_are_skipped(self):
+        from unittest.mock import patch
+        from web_lookup import _searxng
+        with patch.dict("os.environ", {"ROBORATH_SEARXNG_URLS":
+                "http://user:pass@search.example,https://search.example/path?token=x"}), \
+             patch("web_lookup.httpx.get") as get:
+            self.assertEqual(_searxng("query"), [])
+        get.assert_not_called()
+
+    def test_searxng_failure_is_temporarily_cooled_and_falls_back(self):
+        from unittest.mock import patch
+        from web_lookup import _search_sync, _searx_failures
+        with patch.dict("os.environ", {"ROBORATH_SEARXNG_URLS": "https://search.example"}), \
+             patch("web_lookup.httpx.get", side_effect=RuntimeError("network down")), \
+             patch("web_lookup._ddgs_search", return_value=[
+                 {"href": "https://docs.example.org/guide", "title": "A result"}]), \
+             patch("web_lookup._bing_rss", return_value=[]):
+            _searx_failures.clear()
+            answer, domain = _search_sync("docs guide")
+            self.assertIn("https://search.example", _searx_failures)
+            _search_sync("docs guide")
+        self.assertEqual(domain, "docs.example.org")
+
+    def test_search_rejects_non_https_or_ip_result_links(self):
+        from web_lookup import _format_results
+        answer, domain = _format_results([
+            {"href": "http://insecure.example/path", "title": "HTTP"},
+            {"href": "https://127.0.0.1/admin", "title": "Loopback"},
+        ])
+        self.assertEqual((answer, domain), ("", ""))
+
     def test_live_detection(self):
         self.assertFalse(needs_lookup("hello roborath"))
         self.assertFalse(needs_lookup("what do you know about mario kart?"))

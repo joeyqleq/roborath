@@ -18,11 +18,12 @@ class ChatRegressionTests(unittest.TestCase):
         os.environ["GT_TWITCH_DB"]=str(Path(self.tmp.name)/"chat.sqlite3")
         self.old_db_path=bridge.DB_PATH
         bridge.DB_PATH=os.environ["GT_TWITCH_DB"]
-        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="12345"
+        os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="1414798445"
         os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="67890"
         last_user_call.clear()
         last_cooldown_notice.clear()
         self.bot=Bridge()
+        self.bot.access.change("1414798445","fixture-viewer","55555","viewerx","all",True)
         self.out=[]
         async def fake_reply(txt,mid):self.out.append((mid,txt))
         async def fake_stream():return "test-stream"
@@ -39,7 +40,7 @@ class ChatRegressionTests(unittest.TestCase):
             else:os.environ[key]=value
         self.tmp.cleanup()
 
-    def send(self,mid,text,actor="12345",login="joeyleq"):
+    def send(self,mid,text,actor="1414798445",login="joeyleq"):
         return asyncio.run(self.bot.on_chat({"message_id":mid,"chatter_user_id":actor,
                      "chatter_user_login":login,"message":{"text":text}}))
 
@@ -96,7 +97,7 @@ class ChatRegressionTests(unittest.TestCase):
         self.send("good","!ask how many r's are there in strawberry?")
         self.bot.db.execute(
             "INSERT INTO chat_events(message_id,stream_id,twitch_user_id,twitch_login,created_utc,command,request_text,answer_text,status)"
-            " VALUES ('bad','test-stream','12345','joeyleq',?,'chat',?,?,'answered')",
+            " VALUES ('bad','test-stream','1414798445','joeyleq',?,'chat',?,?,'answered')",
             (datetime.now(timezone.utc).isoformat(),
              "!ask how many r's r there in strawberry?", "Six."))
         self.bot.db.commit()
@@ -127,7 +128,7 @@ class ChatRegressionTests(unittest.TestCase):
             self.assertIn("Correct Official Title",answer)
             self.assertNotIn("Rath's Rumble",answer)
 
-    def test_other_viewer_context_is_never_leaked(self):
+    def test_other_viewer_public_chat_is_attributed_and_not_personal_dialogue(self):
         class Recorder:
             def __init__(self):self.kwargs=[]
             async def complete(self,*args,**kw):
@@ -137,7 +138,10 @@ class ChatRegressionTests(unittest.TestCase):
         self.send("ownersecret","!ask describe my secret keyboard?")
         self.send("otherquestion","!ask what is your favorite keyboard layout?",actor="55555",login="viewerx")
         self.assertEqual(len(self.bot.router.kwargs),2)
-        self.assertNotIn("secret keyboard",self.bot.router.kwargs[1]["conversation_context"])
+        context=self.bot.router.kwargs[1]["conversation_context"]
+        self.assertIn("Shared PUBLIC chat excerpts",context)
+        self.assertIn("joeyleq: !ask describe my secret keyboard?",context)
+        self.assertNotIn("Viewer previously asked: !ask describe my secret keyboard?",context)
 
     def test_serialization_orders_rapid_asks(self):
         class Recorder:
@@ -148,7 +152,7 @@ class ChatRegressionTests(unittest.TestCase):
                 return type("Response",(),{"text":"First reply." if "first" in prompt else "Second reply."})()
         self.bot.router=Recorder()
         async def run():
-            def event(mid,q):return {"message_id":mid,"chatter_user_id":"12345","chatter_user_login":"joeyleq","message":{"text":q}}
+            def event(mid,q):return {"message_id":mid,"chatter_user_id":"1414798445","chatter_user_login":"joeyleq","message":{"text":q}}
             await asyncio.gather(
                 self.bot.on_chat(event("serial1","!ask first question about keyboards?")),
                 self.bot.on_chat(event("serial2","!ask second question about keyboards?")))

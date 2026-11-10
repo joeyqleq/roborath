@@ -1,0 +1,13 @@
+# Observed environment and release boundary
+
+ORA3 runs `roborath-irc.service`, active/enabled with zero restarts at inspection. Checkout `/home/jq/projects/roborath` and installed `/opt/roborath` remained at baseline b69675c. Owner-only QA was true and specialist relay configured. The newer source changes in this repository have not been deployed. No service restart or public test post was performed.
+
+ORA1 hosts Mattermost and its private relay channel; there is no separate relay daemon. Authenticated inspection verified exactly the relay bot, specialist bot and owner in the private channel. The relay identity is a non-admin bot. Specialist discovery exposed only the configured search/weather tools; no privileged Admin AI was invoked. Exact provider configuration and billing were not available through that endpoint. The owner identifies Hermes as using Nebius.
+
+Read-only public-chat database inspection confirmed the historical internal tool-call leak and newer failures: passive-aggressive owner replies, invented search claims, broken topical followups, and an unenforced conversational promise to wait for a keyword. Private transcript rows are not included in this repository. Local regressions use synthetic examples.
+
+Bounded service observations: ORA1 loopback SearXNG returned 20–28 candidates over five queries (p50 about 1.073s; p95 about 2.976s), with one or two unresponsive engines. ORA3 service-user access to that host's Tailscale search port was refused; ORA3 loopback search was also refused. Crawl4AI on the inspected private endpoint required authentication (HTTP401). No authenticated crawl completed. Existing ORA3 DDGS/Bing returned results for five queries (p50 about 1.305s; p95 about 2.373s), mostly one domain. Counts and latency do not establish factual quality. Full CPU/RAM/concurrency/crawl comparison remains incomplete; the follow-up audit worker hit its usage limit.
+
+A single private relay smoke returned a final-marker answer with a source in 6.43 seconds. It verifies response correlation/format on that sample, not all source tools, research tasks or provider billing. No live Twitch delivery acceptance has been performed for the new code.
+
+Release requires the owner-approved procedure in `deployment.md`, including private database/config backup, runtime synchronization, startup checks and an owner-only smoke. Public QA must remain disabled until explicitly authorized. User handoff edits are preserved separately. An empty untracked test temporary file remains because automatic execution approval rejected `rm -f tests/test_notifications.py.tmp`; no alternate deletion was attempted.

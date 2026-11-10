@@ -17,6 +17,16 @@ TITLE_FOLLOWUP=re.compile(
     r"^(?:the\s+)?(?:title|name)(?:\s+please)?[?.!]*$", re.I)
 META_FOLLOWUP=re.compile(r"\b(?:previous|earlier|last (?:\d+\s+)?(?:question|answers?|responses?)|"
                          r"remember|memory|are you sure|try again|anomal(?:y|ies))\b",re.I)
+SEARCH_FOLLOWUP=re.compile(
+    r"\b(?:search(?:\s+(?:the\s+)?web)?|look\s+it\s+up|google\s+it|"
+    r"look\s+that\s+up|find\s+sources?|search\s+(?:and|nd)\s+you\s+shall\s+find)\b",
+    re.I)
+SEARCH_FILLER=re.compile(
+    r"^(?:(?:please\s+)?(?:search(?:\s+(?:the\s+)?web)?|look\s+it\s+up|"
+    r"google\s+it|look\s+that\s+up|search\s+(?:and|nd)\s+you\s+shall\s+find)"
+    r"[\s.!?,;:]*|(?:search\s+the\s+web|look\s+it\s+up)\s+for\s+that[\s.!?,;:]*)$",
+    re.I)
+SEARCH_CORRECTION_PREFIX=re.compile(r"^(?:incorrect|wrong|that's\s+wrong|that\s+is\s+wrong|nope)[.!?,;:\s]+",re.I)
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,48 @@ def classify(question:str, *, explicit_search:bool=False, previous_search:str=""
     if explicit_search:
         return Scenario("web_search")
     return Scenario("general")
+
+
+def is_search_followup(question: str) -> bool:
+    """Whether the viewer is asking to search a prior claim/question."""
+    return bool(SEARCH_FOLLOWUP.search(question))
+
+
+def resolve_search_query(question: str,
+                         rows: list[tuple[str, str, str]]) -> str | None:
+    """Resolve a generic search follow-up from the previous user question.
+
+    Rows use Bridge's `(question, answer, command)` shape and are newest first.
+    Only an earlier substantive user question is reused; prior bot answers are
+    intentionally ignored because they may be false or hallucinated. A current
+    query with its own topic stays current.
+    """
+    if not is_search_followup(question):
+        return None
+    current = re.sub(r"\s+", " ", question).strip(" \t.,!?;:")
+    current = SEARCH_CORRECTION_PREFIX.sub("", current).strip()
+    if not SEARCH_FILLER.fullmatch(current):
+        # A query like "search for the 2026 F1 results" already carries its
+        # subject; preserving it is safer than replacing it with history.
+        return None
+    for row in rows:
+        if len(row) < 3:
+            continue
+        previous_question, _previous_answer, command = row[:3]
+        if command not in {"chat", "search"}:
+            continue
+        candidate = re.sub(r"\s+", " ", str(previous_question)).strip()
+        if re.fullmatch(r"(?:!ask|!search|!rr\s+ask|@roborath\s+ask)", candidate, re.I):
+            continue
+        candidate = re.sub(
+            r"^(?:!ask|!search|!rr\s+ask|(?:hey\s+)?roborath\s*[:,!]|@roborath\s+ask)\s+",
+            "", candidate, flags=re.I)
+        if not candidate or SEARCH_FILLER.fullmatch(candidate):
+            continue
+        if exact_letter_count(candidate) is not None:
+            continue
+        return candidate[:700]
+    return None
 
 
 def history_context(rows:list[tuple[str,str,str]], limit:int=5) -> str:

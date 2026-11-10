@@ -6,6 +6,8 @@ from pathlib import Path
 
 os.environ["TWITCH_IRC_NICK"] = "greenbot"
 os.environ["TWITCH_CHANNEL_LOGIN"] = "examplechannel"
+os.environ["ROBORATH_OWNER_TWITCH_USER_ID"] = "1414798445"
+os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"] = "false"
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GT_TWITCH_DB"] = str(Path(tmp) / "twitch.sqlite3")
     import bridge as bridge_module
@@ -37,6 +39,7 @@ with tempfile.TemporaryDirectory() as tmp:
     async def test():
         bridge = IRCAdapter()
         bridge.ws = FakeSocket()
+        bridge.bridge.access.change("1414798445","fixture-grant","1234","viewer","conversation",True)
         # The parent snippet no longer renders as a mini-thread by default.
         bridge.bridge.db.execute(
             "INSERT INTO chat_events(message_id,stream_id,twitch_user_id,twitch_login,created_utc,request_text) "
@@ -56,7 +59,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert sent.count("@viewer")==1,sent
         assert "#MK8DX" not in sent and "🏁" not in sent
         bridge.room_id = ""
-        assert (await bridge.stream_id()).startswith("examplechannel-irc-day-")
+        assert (await bridge.stream_id()).startswith("uncertain-")
         await bridge.bridge.http.aclose()
         bridge.bridge.db.close()
     try:

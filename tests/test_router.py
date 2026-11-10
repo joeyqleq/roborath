@@ -19,7 +19,7 @@ class DummyHTTP:
         self.calls.append((url,json["model"],json["max_tokens"]))
         self.requests.append(json)
         if self.fail_first and len(self.calls)==1:return DummyResponse({},500)
-        return DummyResponse({"choices":[{"message":{"content":"hey chat, quick answer."}}],
+        return DummyResponse({"choices":[{"message":{"role":"assistant","content":"hey chat, quick answer."},"finish_reason":"stop"}],
             "usage":{"prompt_tokens":15,"completion_tokens":10}})
 
 class RouterTests(unittest.TestCase):
@@ -112,5 +112,47 @@ class RouterTests(unittest.TestCase):
         result=asyncio.run(r.complete("what does the document say?",tier="research",sources="Primary source: data"))
         self.assertEqual(result.provider,"NEBIUS")
         self.assertEqual(result.model,"Qwen/Qwen3.5-397B-A17B")
+
+    def test_tool_call_response_fails_closed_and_is_accounted(self):
+        class ToolHTTP(DummyHTTP):
+            async def post(self,url,headers,json,timeout):
+                self.calls.append((url,json["model"],json["max_tokens"]))
+                return DummyResponse({"choices":[{"message":{"role":"assistant",
+                    "content":"<think>{\"name\":\"search_tools\",\"arguments\":{}}"},
+                    "finish_reason":"stop"}],"usage":{"prompt_tokens":31,"completion_tokens":9}})
+        http=ToolHTTP()
+        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+            "MERGE":set(),"NVIDIA":set()})
+        with self.assertRaises(RuntimeError):
+            asyncio.run(r.complete("who started the Six-Day War?"))
+        self.assertAlmostEqual(self.db.reserved_total("NEBIUS"),0.0000058)
+
+    def test_non_assistant_and_tool_finish_are_rejected(self):
+        cases=(({"role":"tool","content":"source text"},"stop"),
+               ({"role":"assistant","content":"no public answer"},"tool_calls"),
+               ({"role":"assistant","content":[{"text":"flatten me"}]},"stop"))
+        for message,finish in cases:
+            class OddHTTP(DummyHTTP):
+                async def post(self,url,headers,json,timeout):
+                    return DummyResponse({"choices":[{"message":message,"finish_reason":finish}],
+                        "usage":{"prompt_tokens":2,"completion_tokens":3}})
+            r=Router(self.env,self.db,OddHTTP(),available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+                "MERGE":set(),"NVIDIA":set()})
+            with self.assertRaises(RuntimeError):
+                asyncio.run(r.complete("hello"))
+
+    def test_provider_circuit_breaker_opens_after_three_bad_responses(self):
+        class BadHTTP(DummyHTTP):
+            async def post(self,url,headers,json,timeout):
+                self.calls.append((url,json["model"],json["max_tokens"]))
+                return DummyResponse({"choices":[],"usage":{}})
+        http=BadHTTP()
+        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+            "MERGE":set(),"NVIDIA":set()})
+        for _ in range(3):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(r.complete("hello"))
+        self.assertEqual(len(http.calls),3)
+        self.assertEqual(list(r.candidates("chat")),[])
 
 if __name__=="__main__":unittest.main()

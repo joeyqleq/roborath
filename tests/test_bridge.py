@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from pathlib import Path
 with tempfile.TemporaryDirectory() as tmp:
     os.environ["GT_TWITCH_DB"] = str(Path(tmp)/"chat.sqlite3")
-    os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="12345"
+    os.environ["ROBORATH_OWNER_TWITCH_USER_ID"]="1414798445"
     os.environ["ROBORATH_STREAMER_TWITCH_USER_ID"]="99999"
     import bridge
     old_db_path=bridge.DB_PATH
@@ -15,6 +15,8 @@ with tempfile.TemporaryDirectory() as tmp:
     bridge.MM_TOKEN = "test-only-placeholder"
     bridge.MM_CHANNEL = "test-only-channel"
     os.environ["ROBORATH_FACT_RELAY_ENABLED"] = "true"
+    os.environ["ROBORATH_PUBLIC_ACCESS_ENABLED"] = "true"
+    os.environ["ROBORATH_OWNER_ONLY_TEST_MODE"] = "false"
     async def mock_shortlinks(text, client):
         return text.replace("https://example.org", "https://is.gd/mock")
     bridge.shorten_sources = mock_shortlinks
@@ -28,7 +30,7 @@ with tempfile.TemporaryDirectory() as tmp:
         bot.stream_id=stream;bot.mm_post=mpost;bot.mm_answer=answer;bot.twitch_reply=reply
         event=lambda mid,txt:{"message_id":mid,"chatter_user_id":"u123","chatter_user_login":"viewer","message":{"text":txt}}
         await bot.on_chat(event("m1","Hello world"))
-        assert bot.db.execute("SELECT count(*) FROM chat_events").fetchone()[0]==1
+        assert bot.db.execute("SELECT count(*) FROM transcript_messages").fetchone()[0]==1
         bridge.last_user_call.clear()
         # A fresh host may have monotonic uptime below the cooldown.
         with patch.object(bridge, "time", SimpleNamespace(monotonic=lambda: 1.0)):
@@ -42,7 +44,7 @@ with tempfile.TemporaryDirectory() as tmp:
         await bot.on_chat(unauthorized)
         assert bot.db.execute("SELECT count(*) FROM rr_text_watches").fetchone()[0]==0
         # Only the verified owner may create watches or delegate trigger_manage.
-        authorized={"message_id":"watch2","chatter_user_id":"12345",
+        authorized={"message_id":"watch2","chatter_user_id":"1414798445",
                     "chatter_user_login":"owner",
                     "message":{"text":"!rr watch sensitive => alert me"}}
         await bot.on_chat(authorized)
@@ -59,4 +61,5 @@ with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(test())
     finally:
         bridge.DB_PATH=old_db_path
+        os.environ.pop("ROBORATH_PUBLIC_ACCESS_ENABLED",None)
 print("PASS: stream logging, agent routing, status and privacy deletion")
