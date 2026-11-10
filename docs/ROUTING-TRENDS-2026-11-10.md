@@ -21,3 +21,13 @@ Access options: apply for the official alpha; use an authorized third-party Tren
 Sources: [official alpha](https://developers.google.com/search/apis/trends), [Google data FAQ](https://support.google.com/trends/answer/4365533?hl=en), [SerpApi Trends API](https://serpapi.com/google-trends-api).
 
 Useful next counters, separate from implemented leaderboards: average words/message; per-hour activity; distinct participants; first-time speakers; questions answered vs failed; invoke balances; source-confirmed corrections. Prefer descriptive counters over inferred traits, viewer presence or watch-time claims. Raw transcript and counts expire after 30 days.
+
+
+Saeed reply follow-up, 2026-11-10 04:39 UTC: deployed `23b0753` using the standard ORA3 installer; source hashes match, service active/running with zero systemd restarts and validated Twitch connection. Backup `/var/lib/roborath/backups/self-stats-20261110T043901Z` includes the pre-release SQLite snapshot. His first plain-chat question lacked an invocation; the next `!ask` unnecessarily requested a username; an explicit @SAEEDMSR question was answered. Self-references now use the authenticated sender ID, and clarification replies refund the shared invoke. The actual unnecessary clarification was refunded once. Live cap had subsequently risen to 10; four used, six remaining at inspection. Latest four actual requests were answered. Private installed-code self-query returned 95 captured messages, 869 words, 3,817 characters and word rank #2 at that snapshot; counts/rank continue changing. No synthetic public post. 41 focused integration tests, correctness lint and GitHub CI 42756904299 passed. Broader source/crawler acceptance remains incomplete; Google integration still awaits authorized account access. Mem0 explicit write remains unavailable because the connector requires reauthentication; this document preserves the checkpoint.
+
+[JQMEM v2 | kind=checkpoint | app=roborath | harness=chatgpt-desktop]
+Objective: Reliable live replies and retained-chat analytics.
+Done: Sender-aware statistics and clarification refunds deployed at 23b0753; Saeed access and answered requests verified.
+Next: Broader handoff source/crawler verification; Google setup after account authorization.
+Constraints: Preserve live grants/theme, private data and local handoff edits.
+Verification: 41 focused tests, lint, CI and installed-code query; service healthy.
