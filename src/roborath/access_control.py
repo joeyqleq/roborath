@@ -74,6 +74,8 @@ def parse_admin(raw: str) -> AdminIntent | None:
                                   "resume responding","you can reply now"):
         return AdminIntent("resume")
     if text in SHOW:return AdminIntent("show")
+    invoke=re.fullmatch(r'(allow|authorize|let)\s+(?:user\s+)?'+LOGIN+r'\s+to\s+(?:invoke|use|access)\s+(?:your|the|all(?: your)?)\s+(?:commands|abilities|features)',text)
+    if invoke:return AdminIntent("grant",invoke[2].lower(),"all")
     for pattern in (ACCESS,GRANT,REVOKE):
         match=pattern.fullmatch(text)
         if not match:continue
@@ -197,7 +199,11 @@ class TestAccess:
         if self.is_owner(user_id):return True
         # During owner-only QA grants are intentionally inert. A display name,
         # prior grant or streamer claim cannot bypass this global boundary.
-        if strict:return False
+        if strict:
+            if os.getenv('ROBORATH_QA_GRANTED_TESTERS','false').lower()!='true':return False
+            cap=requested_capability(raw)
+            grants=self.capabilities(user_id)
+            return bool(cap in grants or (cap=='help' and grants))
         cap=requested_capability(raw)
         if cap in CAPABILITIES and self.broadcaster_id.isdigit() and user_id==self.broadcaster_id:
             return True

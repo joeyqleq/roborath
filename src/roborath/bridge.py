@@ -279,7 +279,7 @@ class Bridge:
             raise PermissionError("unverified reply recipient")
         uid,request,command,status=row
         if status=='privacy_redacted':raise PermissionError("source data was deleted")
-        if strict and not self.access.is_owner(uid):
+        if strict and not self.access.can_receive(uid,('!'+command+' '+request) if command in ('fact','research') else request,strict=True):
             raise PermissionError("owner-only QA")
         # Specialist storage keeps the claim without its command prefix.
         allowed=(self.access.allowed(uid,command) if command in ('fact','research')

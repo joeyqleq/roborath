@@ -12,6 +12,7 @@ from policy import OWNER_TWITCH_ID
 class GrammarTests(unittest.TestCase):
     def test_grant_variations(self):
         samples=(
+            ("!ask allow user TooOld4twitxh to invoke your commands.","grant","tooold4twitxh","all"),
             ("allow @viewerx to fact check","grant","viewerx","fact"),
             ("RoboRath, give this user 'viewerx' conversational abilities","grant","viewerx","conversation"),
             ("give @viewerx all AI abilities","grant","viewerx","all"),
