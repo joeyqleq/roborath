@@ -35,7 +35,7 @@ class OwnerRoleTests(unittest.TestCase):
                 ledger=Ledger(str(Path(temp)/"ledger.sqlite"))
                 http=HTTP()
                 router=Router({"NEBIUS_BASE_URL":"https://model.invalid/v1","NEBIUS_API_KEY":"fake"},
-                              ledger,http,available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},"MERGE":set(),"NVIDIA":set()})
+                              ledger,http,available_models={"NEBIUS":{"NousResearch/Hermes-4-405B"},"MERGE":set(),"NVIDIA":set()})
                 asyncio.run(router.complete("answer plainly",actor_id=uid,owner_id="1414798445",
                                               actor_login=login,actor_role="owner" if login=="joeyleq" else "viewer"))
                 system=http.requests[0]["messages"][0]["content"].casefold()

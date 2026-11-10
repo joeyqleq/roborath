@@ -121,11 +121,11 @@ class RouterTests(unittest.TestCase):
                     "content":"<think>{\"name\":\"search_tools\",\"arguments\":{}}"},
                     "finish_reason":"stop"}],"usage":{"prompt_tokens":31,"completion_tokens":9}})
         http=ToolHTTP()
-        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"NousResearch/Hermes-4-405B"},
             "MERGE":set(),"NVIDIA":set()})
         with self.assertRaises(RuntimeError):
             asyncio.run(r.complete("who started the Six-Day War?"))
-        self.assertAlmostEqual(self.db.reserved_total("NEBIUS"),0.0000058)
+        self.assertAlmostEqual(self.db.reserved_total("NEBIUS"),0.000058)
 
     def test_non_assistant_and_tool_finish_are_rejected(self):
         cases=(({"role":"tool","content":"source text"},"stop"),
@@ -136,7 +136,7 @@ class RouterTests(unittest.TestCase):
                 async def post(self,url,headers,json,timeout):
                     return DummyResponse({"choices":[{"message":message,"finish_reason":finish}],
                         "usage":{"prompt_tokens":2,"completion_tokens":3}})
-            r=Router(self.env,self.db,OddHTTP(),available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+            r=Router(self.env,self.db,OddHTTP(),available_models={"NEBIUS":{"NousResearch/Hermes-4-405B"},
                 "MERGE":set(),"NVIDIA":set()})
             with self.assertRaises(RuntimeError):
                 asyncio.run(r.complete("hello"))
@@ -147,7 +147,7 @@ class RouterTests(unittest.TestCase):
                 self.calls.append((url,json["model"],json["max_tokens"]))
                 return DummyResponse({"choices":[],"usage":{}})
         http=BadHTTP()
-        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"Qwen/Qwen3-30B-A3B-Instruct-2507"},
+        r=Router(self.env,self.db,http,available_models={"NEBIUS":{"NousResearch/Hermes-4-405B"},
             "MERGE":set(),"NVIDIA":set()})
         for _ in range(3):
             with self.assertRaises(RuntimeError):

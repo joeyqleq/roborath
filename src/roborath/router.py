@@ -41,13 +41,13 @@ WINDOW = {"NEBIUS": "lifetime", "MERGE": "month", "NVIDIA": "month"}
 # This is not an authorization policy; only allows routing to preselected models.
 ROUTES = {
     "chat": [
-        ("NEBIUS", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
+        ("NEBIUS", "NousResearch/Hermes-4-405B"),
         ("MERGE", "amazon/nova-2-lite"),
         ("NVIDIA", "nvidia/nemotron-3-super-120b-a12b"),
     ],
     "mario": [
+        ("NEBIUS", "NousResearch/Hermes-4-405B"),
         ("MERGE", "amazon/nova-micro"),
-        ("NEBIUS", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
     ],
     "research": [
         ("NEBIUS", "Qwen/Qwen3.5-397B-A17B"),
