@@ -39,3 +39,11 @@ Completed 2026-11-10 05:03 UTC: `06b49f6` deployed through the standard installe
 Added natural `give alice unlimited invokes for this stream` plus bulk/global targets, optional stream suffix, title and observed spelling variants. `show access` renders unlimited correctly. Shared invoke accounting continues while unlimited, adding a numeric gift preserves unlimited, and explicit set/revoke/global-off remain effective. This is a stream-scoped allowance, not a provider spend-limit override. Owner's actual SaeedMSR request was verified against immutable owner ID and current live stream, username resolved through authenticated Helix, then replayed exactly once using original message ID `42829764-04c9-49df-8604-62e3fbc4b6ec`. Installed access report confirms @saeedmsr allowed unlimited; next-stream limit is None (normal legacy quotas). No synthetic public post.
 
 Backup `/var/lib/roborath/backups/chat-style-unlimited-20261110T050313Z` includes pre-release source and SQLite snapshot. Service active/running, zero restarts, Twitch connection validated. Mem0 writes still require connector reauthentication after retry; explicit preference saved to local ad_hoc memory note as well as bot context. Current request is complete. Broader original handoff source/crawler verification and Google authorization/integration remain unfinished.
+
+
+[JQMEM v2 | kind=checkpoint | app=roborath | harness=chatgpt-desktop]
+Objective: Fix the unconfigured X one two three Twitch bit.
+Root cause: Desktop acknowledgement did not create a bot trigger. Actual owner messages x123 / X one two three fell through to Hermes and repeated the same unrelated whip answer.
+Done: Added protected operator-armed, owner-only, current-stream one-shot aliases with 1h expiry, persisted atomic consume/replay suppression, no model/quota use and existing mute send guard. 222 full tests and correctness lint pass.
+Next: Commit/push, CI, back up/install ORA3, arm x123 and X one two three with concise owner-provided family-lore attribution; verify stored arm and matching without firing publicly. No need to change persona or open QA.
+Constraints: Attribute family detail to owner; do not claim independently verified genealogy. Preserve all existing grants/theme/state and local handoff edits. Mem0 connector remains unavailable due reauthentication.

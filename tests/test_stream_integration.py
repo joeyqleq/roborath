@@ -182,6 +182,21 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_chat(self.event('unteach','!rr forget music',OWNER))
         self.assertEqual(self.bot.db.execute('SELECT COUNT(*) FROM rr_owner_notes').fetchone()[0],0)
 
+    async def test_scripted_owner_reply_bypasses_model_but_obeys_mute_and_once(self):
+        from unittest.mock import AsyncMock
+        self.bot.notifications.arm_once(OWNER,'stream-one','bit',('x123','x one two three'),'A clearly fictional robot rebellion.')
+        self.bot.chat_answer=AsyncMock(side_effect=AssertionError('must not invoke model'))
+        self.bot.access.set_mute(OWNER,'mute-bit',True)
+        await self.bot.on_chat(self.event('muted-bit','!ask x123',OWNER))
+        self.assertEqual(self.frames,[])
+        self.bot.access.set_mute(OWNER,'unmute-bit',False)
+        await self.bot.on_chat(self.event('fired-bit','X one two three',OWNER))
+        self.assertEqual(len(self.frames),1)
+        self.assertIn('fictional robot rebellion',self.frames[-1])
+        await self.bot.on_chat(self.event('fired-bit','X one two three',OWNER))
+        self.assertEqual(len(self.frames),1)
+        self.assertFalse(self.bot.chat_answer.called)
+
     async def test_taught_chat_style_applies_without_topic_word_and_expires(self):
         await self.bot.on_chat(self.event('vibe','!rr remember chat_style => Quick filthy double entendres; banter is fiction.',OWNER))
         self.assertIn('Quick filthy',self.bot.shared_chat_context('stream-one','write a rap','new'))

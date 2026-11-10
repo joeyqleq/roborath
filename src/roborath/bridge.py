@@ -537,6 +537,16 @@ class Bridge:
                 try:await self.twitch_reply(event["_privacy_reply"],mid)
                 finally:self._privacy_replies.pop(mid,None)
             return
+        if self.access.is_owner(speaker) and not self.access.muted():
+            stream=event.get('_stream_id') or await self.stream_id()
+            scripted=self.notifications.take_once(speaker,stream,event['message_id'],raw)
+            if scripted is not None:
+                if not scripted:return
+                mid=event['message_id']
+                self._privacy_replies[mid]=(speaker,event.get('chatter_user_login',''))
+                try:await self.twitch_reply(scripted,mid)
+                finally:self._privacy_replies.pop(mid,None)
+                return
         invoke=parse_invokes(raw)
         if invoke and self.access.is_owner(speaker):
             mid=event['message_id']

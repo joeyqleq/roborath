@@ -26,6 +26,22 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.n.scan("s1","hormuz",self.now+timedelta(minutes=1)),[])
         self.assertEqual(len(self.n.scan("s1","hormuz",self.now+timedelta(minutes=6))),1)
         self.assertEqual(self.n.scan("s1","hormuz",self.now+timedelta(hours=13)),[])
+
+    def test_owner_one_time_reply_aliases_stream_expiry_restart_and_replay(self):
+        self.n.owner_id='999'
+        with self.assertRaises(PermissionError):self.n.arm_once('123','s1','bit',('x123',),'A scripted joke',self.now)
+        self.n.arm_once('999','s1','bit',('x123','X one two three'),'A scripted joke',self.now)
+        self.assertIsNone(self.n.take_once('123','s1','spoof','x123',self.now))
+        self.assertIsNone(self.n.take_once('999','s2','other-stream','x123',self.now))
+        self.assertIsNone(self.n.take_once('999','s1','partial','x1234',self.now))
+        self.assertEqual(self.n.take_once('999','s1','trigger','!ask X, one two three!',self.now),'A scripted joke')
+        restarted=Notifications(self.db,owner_id='999')
+        self.assertEqual(restarted.take_once('999','s1','trigger','x123',self.now),'')
+        self.assertIsNone(restarted.take_once('999','s1','again','x123',self.now))
+        restarted.arm_once('999','s1','late',('x123',),'Expired joke',self.now)
+        self.assertIsNone(restarted.take_once('999','s1','late','x123',self.now+timedelta(hours=2)))
+        restarted.forget('999')
+        self.assertEqual(self.db.execute('SELECT count(*) FROM rr_once_replies').fetchone()[0],0)
     def test_forget_and_limits(self):
         for i in range(5):self.n.add_reminder("u1","s1","1h",str(i),self.now)
         with self.assertRaises(ValueError):

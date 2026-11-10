@@ -5,6 +5,7 @@ QA, offline, and permission checks immediately before posting any returned messa
 """
 from __future__ import annotations
 import re
+import json
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
@@ -136,7 +137,38 @@ class Notifications:
           stream_id TEXT NOT NULL, message_id TEXT NOT NULL, created_utc TEXT NOT NULL,
           PRIMARY KEY(stream_id,message_id)
         )""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS rr_once_replies(
+          name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, stream_id TEXT NOT NULL,
+          phrases TEXT NOT NULL, response TEXT NOT NULL, expires_utc TEXT NOT NULL,
+          fired_message_id TEXT, created_utc TEXT NOT NULL
+        )""")
         self.db.commit()
+
+    def arm_once(self, actor_id, stream_id, name, phrases, response, now=None):
+        if not self.owner_id or str(actor_id)!=self.owner_id:
+            raise PermissionError('only the verified owner can arm one-time replies')
+        phrases=tuple(_public_text(p,80).casefold() for p in phrases)
+        if not stream_id or not re.fullmatch(r'[a-z0-9_-]{1,40}',name) or not 1<=len(phrases)<=5 or any(not p for p in phrases):
+            raise ValueError('give a stream, name and one to five trigger phrases')
+        for phrase in phrases:_whole_phrase(phrase)
+        response=_public_text(response,350)
+        if not response or len(response.encode('utf-8'))>350:
+            raise ValueError('one-time response must fit 350 UTF-8 bytes')
+        when=now or utc_now()
+        with self.db:self.db.execute('INSERT OR REPLACE INTO rr_once_replies VALUES (?,?,?,?,?,?,NULL,?)',
+            (name,self.owner_id,str(stream_id),json.dumps(phrases),response,_iso(when+timedelta(hours=1)),_iso(when)))
+
+    def take_once(self, actor_id, stream_id, message_id, text, now=None):
+        """Atomically consume an owner-only trigger once, including across restart."""
+        if not self.owner_id or str(actor_id)!=self.owner_id or not message_id:return None
+        if self.db.execute('SELECT 1 FROM rr_once_replies WHERE fired_message_id=?',(str(message_id),)).fetchone():return ''
+        when=_iso(now or utc_now())
+        for name,phrases,response in self.db.execute('SELECT name,phrases,response FROM rr_once_replies WHERE owner_id=? AND stream_id=? AND fired_message_id IS NULL AND expires_utc>? ORDER BY created_utc LIMIT 20',(self.owner_id,str(stream_id),when)).fetchall():
+            if not any(_whole_phrase(p).search(str(text).casefold()) for p in json.loads(phrases)):continue
+            with self.db:
+                changed=self.db.execute('UPDATE rr_once_replies SET fired_message_id=? WHERE name=? AND fired_message_id IS NULL',(str(message_id),name)).rowcount
+            if changed:return response
+        return None
 
     def add_reminder(self, user, stream, delay, text, now=None):
         seconds = parse_duration(delay)
@@ -442,6 +474,7 @@ class Notifications:
         cutoff = _iso(when - timedelta(days=max(1, min(30, retention_days))))
         iso_now = _iso(when)
         with self.db:
+            self.db.execute('DELETE FROM rr_once_replies WHERE expires_utc<?',(iso_now,))
             # An undelivered reminder more than 30 days overdue is stale too.
             self.db.execute("DELETE FROM rr_reminders WHERE COALESCE(delivered_utc,cancelled_utc,due_utc)<? OR (delivered_utc IS NULL AND cancelled_utc IS NULL AND due_utc<?)", (cutoff, cutoff))
             self.db.execute("DELETE FROM rr_text_watches WHERE expires_utc<?", (cutoff,))
@@ -454,6 +487,7 @@ class Notifications:
 
     def forget(self, user):
         with self.db:
+            self.db.execute('DELETE FROM rr_once_replies WHERE owner_id=?',(str(user),))
             self.db.execute("DELETE FROM rr_reminders WHERE twitch_user_id=?", (user,))
             self.db.execute("DELETE FROM rr_text_watches WHERE twitch_user_id=?", (user,))
             self.db.execute("DELETE FROM rr_first_chat_seen WHERE twitch_user_id=?", (user,))
