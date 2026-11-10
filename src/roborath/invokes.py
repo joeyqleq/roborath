@@ -26,6 +26,12 @@ def parse(text: str) -> InvokeIntent | None:
     value=re.sub(r'\b(?:invoke|invocation|command|ai)\s+(permissions?|access)\b',r'\1',value)
     value=re.sub(r'\b(?:all|every)\s+(?:usernames|chatters|viewers|people)\b','everyone',value)
     value=re.sub(r'\b(?:user|username)\s+(?=@?[a-z][a-z0-9_]{2,24}\b)','',value)
+    # Explicit unlimited gifts are scoped to the current stream, like numbers.
+    # Titles and an optional trailing reason do not change the verified target.
+    unlimited = re.fullmatch(rf'(?:give|grant|allow)\s+(?:(?:prince|boss|captain|chairman)\s+)?{_TARGETS}\s+(?:unlimited|unliited|unlimted)\s+(?:invokes?|invocations?|uses?)(?:\s+for\s+(?:this|the current)\s+stream)?(?:\s+so\s+[^\n]{{1,240}})?',value)
+    if not unlimited:
+        unlimited = re.fullmatch(rf'(?:give|grant)\s+(?:unlimited|unliited|unlimted)\s+(?:invokes?|invocations?|uses?)\s+to\s+{_TARGETS}(?:\s+for\s+(?:this|the current)\s+stream)?',value)
+    if unlimited:return InvokeIntent('unlimited',_parse_targets(unlimited[1]))
     # Natural owner phrasing: a gift means more uses, never a pretend LLM action.
     natural=re.fullmatch(rf'(?:give|grant)\s+(?:(\d+)\s+(?:more\s+)?(?:invokes?|invocations?|uses?)\s+to\s+|(?:permissions?|access)\s+to\s+|to\s+){_TARGETS}',value)
     if natural:return InvokeIntent('add',_parse_targets(natural[2]),int(natural[1] or 2))
@@ -118,7 +124,7 @@ class InvokeStore:
         if not message_id:
             raise ValueError("message ID required for idempotent controls")
         target_list = tuple(str(t) for t in targets)
-        if action not in {"allow", "deny", "set", "add", "subtract", "global_allow", "global_off"}:
+        if action not in {"allow", "deny", "set", "add", "subtract", "unlimited", "global_allow", "global_off"}:
             raise ValueError("unsupported invoke action")
         if action not in {"global_allow", "global_off"}:
             if not target_list or any(t != "*" and not t.isdigit() for t in target_list):
@@ -129,6 +135,8 @@ class InvokeStore:
             raise ValueError("invoke amount must be between 0 and 10000")
         if action in {"allow", "deny"}:
             amount = 0
+        if action == 'unlimited' and not stream_id:
+            raise ValueError('current stream required for unlimited invokes')
         self.db.execute("BEGIN IMMEDIATE")
         try:
             cur = self.db.execute("INSERT OR IGNORE INTO rr_invoke_audit(message_id,actor_id,action,targets,amount,stream_id) VALUES(?,?,?,?,?,?)",
@@ -143,7 +151,7 @@ class InvokeStore:
                     self.db.execute("INSERT INTO rr_invoke_rules(user_id,allowed,limit_count,updated_by) VALUES('*',1,-1,?) ON CONFLICT(user_id) DO UPDATE SET allowed=1,limit_count=-1,updated_by=excluded.updated_by", (str(actor_id),))
             else:
                 # A fresh global allowance explicitly reopens the non-owner gate.
-                if target_list==('*',) and action in ('set','add','allow'):
+                if target_list==('*',) and action in ('set','add','allow','unlimited'):
                     self.db.execute('UPDATE rr_invoke_global SET enabled=1,updated_by=? WHERE singleton=1',(str(actor_id),))
                 for target in target_list:
                     prior = self.db.execute("SELECT limit_count FROM rr_invoke_limits WHERE user_id=? AND stream_id=?", (target,str(stream_id))).fetchone()
@@ -156,14 +164,16 @@ class InvokeStore:
                         allowed, limit = 0, 0
                     elif action == "allow":
                         allowed, limit = 1, -1
+                    elif action == 'unlimited':
+                        allowed, limit = 1, -1
                     elif action == "set":
                         allowed, limit = 1, int(amount)
                     elif action == "add":
-                        allowed, limit = 1, (int(prior[0]) if prior else 0) + int(amount)
+                        allowed, limit = 1, (-1 if prior and int(prior[0]) < 0 else (int(prior[0]) if prior else 0) + int(amount))
                     else:
                         allowed, limit = 1, max(0, (int(prior[0]) if prior else int(base[0]) if base else 0) - int(amount))
                     base_limit = (-1 if action == "allow" or (base and int(base[0]) < 0)
-                                  else 0 if action in {"set", "add", "subtract"} else limit)
+                                  else 0 if action in {"set", "add", "subtract", "unlimited"} else limit)
                     self.db.execute("INSERT INTO rr_invoke_rules(user_id,allowed,limit_count,updated_by) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET allowed=excluded.allowed,limit_count=excluded.limit_count,updated_by=excluded.updated_by",
                                     (target, allowed, base_limit, str(actor_id)))
                     if action in {"allow", "deny"}:
@@ -217,14 +227,12 @@ class InvokeStore:
         limit = self.limit(uid, stream)
         if limit is None:
             return access is not False
-        if limit < 0:
-            return True
         if limit == 0:
             return False
         self.db.execute("BEGIN IMMEDIATE")
         try:
             used = self.db.execute("SELECT COUNT(*) FROM rr_invoke_usage WHERE user_id=? AND stream_id=? AND used=1", (uid, stream)).fetchone()[0]
-            if used >= limit:
+            if limit >= 0 and used >= limit:
                 self.db.rollback()
                 return False
             cur = self.db.execute("INSERT OR IGNORE INTO rr_invoke_usage(message_id,user_id,stream_id,used) VALUES(?,?,?,1)", (mid, uid, stream))

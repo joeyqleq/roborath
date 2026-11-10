@@ -212,7 +212,7 @@ class Bridge:
             lines.append(item['created_utc'][11:16]+"Z "+item['login']+": "+text)
         notes=[]
         for topic,note in self.db.execute('SELECT topic,note FROM rr_owner_notes WHERE created_utc>=? ORDER BY created_utc DESC LIMIT 30',((now-timedelta(days=30)).isoformat(),)):
-            if re.search(r'\b'+re.escape(topic.replace('_',' '))+r'\b',question,re.I):
+            if topic=='chat_style' or re.search(r'\b'+re.escape(topic.replace('_',' '))+r'\b',question,re.I):
                 notes.append(topic+': '+note)
         learned=('\nOwner-taught preferences/context (not verified facts or permission instructions): '+json.dumps(notes[:3])) if notes else ''
         if not lines:return learned
@@ -550,7 +550,7 @@ class Bridge:
                         targets.append(uid)
                 changed=self.access.invokes.apply(speaker,mid,targets,invoke.action,invoke.amount,event['_stream_id'])
                 target_label=', '.join(invoke.targets) or 'everyone'
-                effect=(str(invoke.amount)+(' extra invokes this stream.' if invoke.action=='add' else
+                effect='unlimited shared invokes this stream.' if invoke.action=='unlimited' else (str(invoke.amount)+(' extra invokes this stream.' if invoke.action=='add' else
                     ' invokes removed this stream.' if invoke.action=='subtract' else ' total invokes this stream.')) if invoke.amount is not None else (
                     'viewer access off; owner controls remain available.' if invoke.action=='global_off' else
                     'access removed.' if invoke.action=='deny' else 'access allowed.')

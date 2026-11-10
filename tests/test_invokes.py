@@ -41,6 +41,15 @@ class InvokeParserTests(unittest.TestCase):
         for raw in ("allow me to tell you a story", "how many invokes do I have?", "everyone can invoke commands"):
             self.assertIsNone(parse(raw))
 
+    def test_unlimited_natural_controls(self):
+        for raw,targets in [
+            ('!ask give prince SAEEDMSR unliited invokes for this stream so he can test the bot',('saeedmsr',)),
+            ('give alice unlimited invokes',('alice',)),
+            ('give unlimited invokes to alice and bob for this stream',('alice','bob')),
+            ('allow everyone unlimited invokes for the current stream',('*',))]:
+            intent=parse(raw)
+            self.assertEqual((intent.action,intent.targets,intent.amount),('unlimited',targets,None))
+
 
 class InvokeStoreTests(unittest.TestCase):
     def setUp(self):
@@ -104,6 +113,23 @@ class InvokeStoreTests(unittest.TestCase):
         self.assertTrue(self.store.reserve("456", "a", "stream-A"))
         self.store.forget("456")
         self.assertEqual(self.store.status("stream-A")["usage"], [])
+
+    def test_unlimited_stream_overrides_numeric_wildcard_and_is_revocable(self):
+        self.apply('wild',('*',),'set',2)
+        self.apply('unlimited',('456',),'unlimited')
+        self.assertEqual(self.store.limit('456','stream-A'),-1)
+        for i in range(12):self.assertTrue(self.store.reserve('456',str(i),'stream-A'))
+        self.assertIsNone(self.store.limit('456','stream-B'))
+        self.apply('gift',('456',),'add',2)
+        self.assertEqual(self.store.limit('456','stream-A'),-1)
+        self.apply('cap',('456',),'set',3)
+        self.assertFalse(self.store.reserve('456','capped','stream-A'))
+        self.apply('again',('456',),'unlimited')
+        self.apply('off',(),'global_off')
+        self.assertFalse(self.store.reserve('456','blocked','stream-A'))
+        self.assertTrue(self.store.reserve('1414798445','owner','stream-A'))
+        with self.assertRaises(PermissionError):self.store.apply('456','fake',('456',),'unlimited',stream_id='stream-A')
+        with self.assertRaises(ValueError):self.store.apply('1414798445','no-stream',('456',),'unlimited')
 
     def test_global_gift_reopens_and_repeated_gift_extends_remaining(self):
         self.apply('off',(),'global_off')

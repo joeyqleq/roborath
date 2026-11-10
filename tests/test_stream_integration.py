@@ -136,6 +136,20 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PermissionError):await self.adapter.reply('must not send','beforeoff')
         self.assertTrue(self.bot.access.can_receive(OWNER,'!ask hello',True))
 
+    async def test_owner_unlimited_command_uses_verified_target_and_reports_status(self):
+        self.bot.access.invokes.apply(OWNER,'wild',['*'],'set',2,'stream-one')
+        async def lookup(name):
+            self.assertEqual(name,'viewerx')
+            return VIEWER,'viewerx'
+        self.bot.lookup_twitch_login=lookup
+        await self.bot.on_chat(self.event('free','!ask give prince viewerx unliited invokes for this stream so he can test',OWNER))
+        self.assertEqual(self.bot.access.invokes.limit(VIEWER,'stream-one'),-1)
+        self.assertIn('unlimited shared invokes this stream',self.frames[-1])
+        self.adapter.last_send=-1e6
+        await self.bot.on_chat(self.event('status-unlimited','show access',OWNER))
+        self.assertIn('@viewerx allowed unlimited',self.frames[-1])
+        self.assertIsNone(self.bot.access.invokes.limit(VIEWER,'next-stream'))
+
     async def test_authorized_theme_exception_remains_mutable_at_wire_boundary(self):
         self.bot.theme.activate();self.bot.theme.observe('stream-one',True)
         self.bot.live_stream={'id':'stream-one'};self.bot.live_verified_until=time.monotonic()+60
@@ -167,6 +181,12 @@ class StreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.adapter.last_send=-1e6
         await self.bot.on_chat(self.event('unteach','!rr forget music',OWNER))
         self.assertEqual(self.bot.db.execute('SELECT COUNT(*) FROM rr_owner_notes').fetchone()[0],0)
+
+    async def test_taught_chat_style_applies_without_topic_word_and_expires(self):
+        await self.bot.on_chat(self.event('vibe','!rr remember chat_style => Quick filthy double entendres; banter is fiction.',OWNER))
+        self.assertIn('Quick filthy',self.bot.shared_chat_context('stream-one','write a rap','new'))
+        with self.bot.db:self.bot.db.execute('UPDATE rr_owner_notes SET created_utc=?',((datetime.now(timezone.utc)-timedelta(days=31)).isoformat(),))
+        self.assertNotIn('Quick filthy',self.bot.shared_chat_context('stream-one','write a rap','new'))
 
     async def test_hours_old_word_counts_and_first_speech_are_exact_not_join_time(self):
         start=datetime.now(timezone.utc)-timedelta(hours=3)

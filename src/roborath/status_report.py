@@ -105,10 +105,12 @@ def render_access(access, stream_id: str, page: int = 1) -> str:
     if wildcard is not None:
         allowed, base_limit = wildcard
         limit = scoped.get("*", base_limit if base_limit >= 0 else None)
+        if limit is not None and limit < 0:limit=None
         rows.append(("everyone", allowed, limit, "*"))
     for uid, (allowed, base_limit) in users.items():
         # A user's explicit unlimited rule takes priority over wildcard quotas.
         limit = scoped.get(uid, None if base_limit is not None and base_limit<0 else scoped.get("*", None))
+        if limit is not None and limit < 0:limit=None
         used = 0
         try:
             used = db.execute("SELECT COUNT(*) FROM rr_invoke_usage WHERE user_id=? AND stream_id=? AND used=1", (uid, str(stream_id))).fetchone()[0]

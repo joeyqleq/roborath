@@ -108,6 +108,7 @@ Verified owner may use these directly or after `!ask`:
 
 - `allow alice` / `allow alice and bob` / `allow alice, bob, carol`: give each named user two additional shared AI invokes for the current stream.
 - `give alice 3 invokes`: give three additional shared AI invokes for the current stream.
+- `give alice unlimited invokes for this stream`: remove the per-user shared invoke cap for the current stream. `give alice unlimited invokes` and `give unlimited invokes to alice and bob` also work. The owner alone may issue this; global off, mute, cooldowns and provider spending limits remain effective. `set alice to 3 invokes` restores a total cap; `remove alice` revokes access. It does not carry unlimited use into the next stream.
 - `add 2 invokes to alice and bob`: increase each allowance by 2.
 - `remove 1 invoke from alice`: lower the current stream allowance by 1.
 - `allow everyone 2 invokes`: shared per-viewer allowance of 2 in this stream. Individual explicit rules take precedence.
@@ -124,7 +125,7 @@ Temporary theme authorized 2026-11-10: Hegseth/Trump/war accountability, current
 - `!rr status` or `!ask status`: compact state, active stream, model and shared invoke usage. Owner only.
 - `show access`, `!rr access status`, or `!ask who is currently allowed to use you?`: paginated access report. `show access 2` selects page 2.
 - Global off always excludes Joeyleq. While `stop talking` suppresses ordinary replies, owner status/access reports and resume remain available.
-- `!rr remember music => Our favourite band is System of a Down`: save owner-taught topic context for up to 30 days. `!rr forget music` deletes it. These are preferences/context, not verified evidence or permission changes. The exact topic word selects notes for later conversation; no model weights change.
+- `!rr remember music => Our favourite band is System of a Down`: save owner-taught topic context for up to 30 days. `!rr forget music` deletes it. These are preferences/context, not verified evidence or permission changes. The exact topic word selects notes for later conversation; the reserved `chat_style` topic applies generally to conversations. It also expires after 30 days and can be deleted with `!rr forget chat_style`. No model weights change.
 - `!ask latest Israel news`: fetch recent BBC/Al Jazeera RSS summaries on demand, cached for five minutes, limited to reports published in the last 48 hours. Reply attributes publisher/date and links a report. RSS is publisher reporting, not independent confirmation; this does not guarantee complete breaking-news coverage or full-article access.
 
 The specialist relay now requests a compact final body with one fact source or up to two research sources. The Twitch gateway formats, shortens and clips; there is no second model summarizing the specialist reply.
